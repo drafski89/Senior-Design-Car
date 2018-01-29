@@ -4,7 +4,12 @@
 #include <SDL2/SDL.h>
 #include <cstdio>
 #include <cstdlib>
+#include <errno.h>
 #include <time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 struct GamepadState
 {
@@ -26,12 +31,15 @@ private:
     int gamepad; // which gamepad we are using
     struct GamepadState gamepad_state;
     SDL_Joystick* sdl_gamepad;
+    int robot_socket;
+
+    int _init_tcp();
 
 public:
     RemoteCtlApp();
 
     int execute();
-    int _init();
+    int _init_sdl();
     void _event(SDL_Event* Event);
     void _loop();
     void _cleanup();
