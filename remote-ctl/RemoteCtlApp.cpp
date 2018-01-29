@@ -107,7 +107,7 @@ void RemoteCtlApp::_event(SDL_Event* event)
         if (true)
         {
             int value = event->jaxis.value;
-            if (value > 0) { value += 1; }
+            if (value > 0) { value += 1; } // limit of short is 32,767. increment to make division by 32768 equal 1
 
             double axis_val = (double)value / 32768.0;
 
