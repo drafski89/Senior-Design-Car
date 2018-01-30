@@ -2,8 +2,8 @@
 
 using namespace std;
 
-RemoteCtlApp::RemoteCtlApp() : running(true), gamepad(0), sdl_gamepad(NULL),
-                               robot_socket(0)
+RemoteCtlApp::RemoteCtlApp() : running(true), last_refresh(0), last_broadcast(0),
+                               gamepad(0), sdl_gamepad(NULL), robot_socket(0)
 {
     memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
 }
@@ -48,10 +48,10 @@ int RemoteCtlApp::_init_tcp()
         printf("Failed to open TCP socket for connections. Error: 0x%08x\n", errno);
         return errno;
     }
-    
+
     // set socket to nonblocking to avoid stopping whole application when handling connections
     int sock_flags = fcntl(robot_socket, F_GETFL, NULL);
-    
+
     if (sock_flags < 0)
     {
         close(robot_socket);
@@ -59,7 +59,7 @@ int RemoteCtlApp::_init_tcp()
         printf("Failed to fetch socket options. fcntl(): F_GETFL error: 0x08%x\n", errno);
         return errno;
     }
-    
+
     sock_flags |= O_NONBLOCK;
     if (fcntl(robot_socket, F_SETFL, sock_flags) == -1)
     {
@@ -69,6 +69,8 @@ int RemoteCtlApp::_init_tcp()
         return errno;
     }
 
+
+
     return EXIT_SUCCESS;
 }
 
@@ -76,12 +78,12 @@ void RemoteCtlApp::_connect_handler()
 {
     if (robot_socket)
     {
-        struct sockaddr connection_addr;
-        memset((void*)&connection_addr, 0, sizeof(struct sockaddr));
-        
-        socklen_t addr_bytes = sizeof(struct sockaddr);
-        int connection_sock = accept(robot_socket, &connection_addr, &addr_bytes);
-        
+        struct sockaddr_in connection_addr;
+        memset((void*)&connection_addr, 0, sizeof(struct sockaddr_in));
+
+        socklen_t addr_bytes = sizeof(struct sockaddr_in);
+        int connection_sock = accept(robot_socket, (struct sockaddr*)&connection_addr, &addr_bytes);
+
         if (connection_sock == -1)
         {
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK))
@@ -91,8 +93,55 @@ void RemoteCtlApp::_connect_handler()
         }
         else
         {
-            printf("New connection from %s\n", connection_addr.s_addr);
+            printf("New connection from %s\n", inet_ntoa(connection_addr.sin_addr));
+            connections.push_back(pair<int, struct sockaddr_in>(connection_sock, connection_addr));
         }
+    }
+}
+
+void RemoteCtlApp::_tx_handler()
+{
+    for (auto iter = connections.begin(); iter != connections.end(); )
+    {
+        pair<int, struct sockaddr_in>& connection = *iter;
+        int connection_sock = connection.first;
+
+        char mesg[DEFAULT_MESG_SIZE];
+        memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
+        memcpy((void*)mesg, (void*)&gamepad_state, sizeof(struct GamepadState));
+
+        int bytes_sent = send(connection_sock, (void*)mesg, DEFAULT_MESG_SIZE, 0);
+
+        if (bytes_sent == -1)
+        {
+            if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+            {
+                // do nothing. this is okay.
+            }
+            else if (errno == ECONNRESET)
+            {
+                printf("Lost connection to %s. Reset by peer.\n", inet_ntoa(connection.second.sin_addr));
+                close(connection_sock);
+                iter = connections.erase(iter);
+                continue;
+            }
+            else if (errno == ENOTCONN)
+            {
+                printf("Lost connection to %s. Dropped.\n", inet_ntoa(connection.second.sin_addr));
+                close(connection_sock);
+                iter = connections.erase(iter);
+                continue;
+            }
+            else
+            {
+                printf("Unable to send to %s. send() error 0x08%x\n", inet_ntoa(connection.second.sin_addr), errno);
+                close(connection_sock);
+                iter = connections.erase(iter);
+                continue;
+            }
+        }
+
+        iter++;
     }
 }
 
@@ -216,11 +265,15 @@ void RemoteCtlApp::_event(SDL_Event* event)
 
 void RemoteCtlApp::_loop()
 {
-    static time_t last_update = 0;
+    struct timeval current_time;
+    memset((void*)&current_time, 0, sizeof(struct timeval));
 
-    time_t current_time = time(NULL);
+    gettimeofday(&current_time, NULL);
 
-    if (current_time - last_update >= 1)
+    unsigned long ctime_ms = current_time.tv_sec * 1000 +
+                             current_time.tv_usec / 1000;
+
+    if (ctime_ms - last_refresh >= 200)
     {
         char button[33];
         button[32] = '\0';
@@ -230,14 +283,21 @@ void RemoteCtlApp::_loop()
             button[index] = gamepad_state.button[index] + 0x30;
         }
 
-        printf("X: %g    Y: %g    Z: %g\n"
-               "Y: %g    P: %g    R: %g\n"
-               "%s\n",
+        printf("X: %06.4g    Y: %06.4g    Z: %06.4g    Y: %06.4g    P: %06.4g    R: %06.4g    %s\r",
                gamepad_state.axis_x, gamepad_state.axis_y, gamepad_state.axis_z,
                gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
                button);
 
-        last_update = current_time;
+        last_refresh = ctime_ms;
+    }
+
+    _connect_handler();
+
+    if (ctime_ms - last_broadcast >= 20)
+    {
+        _tx_handler();
+
+        last_broadcast = ctime_ms;
     }
 }
 

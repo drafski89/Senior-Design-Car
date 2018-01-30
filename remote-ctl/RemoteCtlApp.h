@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <errno.h>
-#include <time.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <vector>
 #include <utility>
+
+#define DEFAULT_MESG_SIZE 512
 
 struct GamepadState
 {
@@ -32,15 +34,23 @@ struct GamepadState
 class RemoteCtlApp
 {
 private:
+    // program behavior variables
     bool running;
+    unsigned long last_refresh;   // when the console was last updated with debug info
+    unsigned long last_broadcast; // when the gamepad's state was last transmitted to robot
+
+    // SDL gamepad information
     int gamepad; // which gamepad we are using
     struct GamepadState gamepad_state;
     SDL_Joystick* sdl_gamepad;
+
+    // connection information
     int robot_socket;
-    std::vector<std::pair<int, struct sockaddr>> connections;
+    std::vector<std::pair<int, struct sockaddr_in>> connections;
 
     int _init_tcp();
     void _connect_handler();
+    void _tx_handler();
 
 public:
     RemoteCtlApp();

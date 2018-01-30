@@ -79,6 +79,56 @@ int main(int argc, char* argv[])
     {
         printf("Failed to connect to control host. %s. Error: 0x%08x",
                connect_err_mesg(errno), errno);
+        return EXIT_FAILURE;
+    }
+
+    printf("Success! Now listening for commands...\n");
+
+    int bytes_recieved = DEFAULT_MESG_SIZE;
+    struct GamepadState gamepad_state;
+    memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
+
+    char mesg[DEFAULT_MESG_SIZE];
+
+    while (bytes_recieved > -1)
+    {
+        memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
+        bytes_recieved = recv(command_socket, (void*)mesg, DEFAULT_MESG_SIZE, 0);
+
+        if (bytes_recieved == -1)
+        {
+            if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+            {
+                continue;
+            }
+            else if (errno == ECONNREFUSED)
+            {
+                printf("Lost connection to host. Stopping...\n");
+                close(command_socket);
+            }
+            else
+            {
+                printf("Connection error. recv() error 0x08%x\n", errno);
+                close(command_socket);
+            }
+        }
+        else
+        {
+            memcpy((void*)&gamepad_state, (void*)mesg, sizeof(struct GamepadState));
+
+            char button[33];
+            memset((void*)button, 0, 33);
+
+            for (int index = 0; index < 32; index++)
+            {
+                button[index] = gamepad_state.button[index] + 0x30;
+            }
+
+            printf("X: %06.4g    Y: %06.4g    Z: %06.4g    Y: %06.4g    P: %06.4g    R: %06.4g    %s\r",
+                   gamepad_state.axis_x, gamepad_state.axis_y, gamepad_state.axis_z,
+                   gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
+                   button);
+        }
     }
 
     return EXIT_SUCCESS;
