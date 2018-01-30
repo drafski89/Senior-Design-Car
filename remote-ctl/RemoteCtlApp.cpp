@@ -17,6 +17,7 @@ int RemoteCtlApp::_init_tcp()
 
     if (!robot_socket)
     {
+        robot_socket = 0;
         printf("Failed to create TCP socket. Error: 0x%08x\n", errno);
         return errno;
     }
@@ -31,6 +32,8 @@ int RemoteCtlApp::_init_tcp()
     // will not compile without that wierd looking type cast
     if (bind(robot_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)))
     {
+        close(robot_socket);
+        robot_socket = 0;
         printf("Failed to bind TCP socket to port. Error: 0x%08x\n", errno);
         return errno;
     }
@@ -40,11 +43,57 @@ int RemoteCtlApp::_init_tcp()
     // open the socket for at least one connection
     if (listen(robot_socket, 1))
     {
+        close(robot_socket);
+        robot_socket = 0;
         printf("Failed to open TCP socket for connections. Error: 0x%08x\n", errno);
+        return errno;
+    }
+    
+    // set socket to nonblocking to avoid stopping whole application when handling connections
+    int sock_flags = fcntl(robot_socket, F_GETFL, NULL);
+    
+    if (sock_flags < 0)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        printf("Failed to fetch socket options. fcntl(): F_GETFL error: 0x08%x\n", errno);
+        return errno;
+    }
+    
+    sock_flags |= O_NONBLOCK;
+    if (fcntl(robot_socket, F_SETFL, sock_flags) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        printf("Failed to set socket options. fcntl(): F_SETFL error: 0x08%x\n", errno);
         return errno;
     }
 
     return EXIT_SUCCESS;
+}
+
+void RemoteCtlApp::_connect_handler()
+{
+    if (robot_socket)
+    {
+        struct sockaddr connection_addr;
+        memset((void*)&connection_addr, 0, sizeof(struct sockaddr));
+        
+        socklen_t addr_bytes = sizeof(struct sockaddr);
+        int connection_sock = accept(robot_socket, &connection_addr, &addr_bytes);
+        
+        if (connection_sock == -1)
+        {
+            if ((errno != EAGAIN) && (errno != EWOULDBLOCK))
+            {
+                printf("Error establishing new connection. accept() error 0x08%x\n", errno);
+            }
+        }
+        else
+        {
+            printf("New connection from %s\n", connection_addr.s_addr);
+        }
+    }
 }
 
 int RemoteCtlApp::_init_sdl()

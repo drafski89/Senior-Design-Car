@@ -10,6 +10,11 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <vector>
+#include <utility>
 
 struct GamepadState
 {
@@ -32,8 +37,10 @@ private:
     struct GamepadState gamepad_state;
     SDL_Joystick* sdl_gamepad;
     int robot_socket;
+    std::vector<std::pair<int, struct sockaddr>> connections;
 
     int _init_tcp();
+    void _connect_handler();
 
 public:
     RemoteCtlApp();

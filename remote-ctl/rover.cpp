@@ -1,18 +1,20 @@
 #include "RemoteCtlApp.h"
+#include <string>
+#include <iostream>
 
 using namespace std;
 
-const char* err_mesgs[] = {
+char* err_mesgs[] = {
     "No route to requested IP address",
     "Connection refused",
     "Connection timed out",
     "Connect was reset",
     "Unhandled connection error",
-}
+};
 
-const char* connect_err_mesg(int code)
+char* connect_err_mesg(int code)
 {
-    const char* err_mesg = NULL;
+    char* err_mesg = NULL;
 
     switch (code)
     {
@@ -55,7 +57,7 @@ int main(int argc, char* argv[])
         memset((void*)&host_addr, 0, sizeof(struct in_addr));
         cin >> addr_str;
 
-    } while (!inet_aton(addr_str.c_str(), &host_addr))
+    } while (!inet_aton(addr_str.c_str(), &host_addr));
 
     printf("Creating TCP socket for recieving commands...\n");
     int command_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -75,7 +77,8 @@ int main(int argc, char* argv[])
 
     if (connect(command_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)))
     {
-        printf("Failed to connect to control host. ");
+        printf("Failed to connect to control host. %s. Error: 0x%08x",
+               connect_err_mesg(errno), errno);
     }
 
     return EXIT_SUCCESS;
