@@ -1,3 +1,3 @@
 #!/bin/bash
 
-g++ -Wall -o rover -lSDL2 rover.cpp
+g++ -std=c++11 -Wall -o rover rover.cpp

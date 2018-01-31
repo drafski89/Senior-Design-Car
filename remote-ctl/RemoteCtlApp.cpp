@@ -69,8 +69,6 @@ int RemoteCtlApp::_init_tcp()
         return errno;
     }
 
-
-
     return EXIT_SUCCESS;
 }
 
@@ -110,7 +108,7 @@ void RemoteCtlApp::_tx_handler()
         memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
         memcpy((void*)mesg, (void*)&gamepad_state, sizeof(struct GamepadState));
 
-        int bytes_sent = send(connection_sock, (void*)mesg, DEFAULT_MESG_SIZE, 0);
+        int bytes_sent = send(connection_sock, (void*)mesg, DEFAULT_MESG_SIZE, MSG_NOSIGNAL);
 
         if (bytes_sent == -1)
         {
@@ -132,9 +130,17 @@ void RemoteCtlApp::_tx_handler()
                 iter = connections.erase(iter);
                 continue;
             }
+            else if (errno == EPIPE)
+            {
+                printf("Lost connection %s. Connection unexpectedly closed.\n", inet_ntoa(connection.second.sin_addr));
+                close(connection_sock);
+                iter = connections.erase(iter);
+                continue;
+            }
             else
             {
-                printf("Unable to send to %s. send() error 0x08%x\n", inet_ntoa(connection.second.sin_addr), errno);
+                printf("Unable to send to %s. send() error 0x08%x. Terminating connection.\n",
+                       inet_ntoa(connection.second.sin_addr), errno);
                 close(connection_sock);
                 iter = connections.erase(iter);
                 continue;
@@ -273,6 +279,7 @@ void RemoteCtlApp::_loop()
     unsigned long ctime_ms = current_time.tv_sec * 1000 +
                              current_time.tv_usec / 1000;
 
+    /*
     if (ctime_ms - last_refresh >= 200)
     {
         char button[33];
@@ -290,6 +297,7 @@ void RemoteCtlApp::_loop()
 
         last_refresh = ctime_ms;
     }
+    */
 
     _connect_handler();
 

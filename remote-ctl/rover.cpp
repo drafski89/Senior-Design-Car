@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
                 button[index] = gamepad_state.button[index] + 0x30;
             }
 
-            printf("X: %06.4g    Y: %06.4g    Z: %06.4g    Y: %06.4g    P: %06.4g    R: %06.4g    %s\r",
+            printf("X: %+06.4g    Y: %+06.4g    Z: %+06.4g    Y: %+06.4g    P: %+06.4g    R: %+06.4g    %s\r",
                    gamepad_state.axis_x, gamepad_state.axis_y, gamepad_state.axis_z,
                    gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
                    button);
