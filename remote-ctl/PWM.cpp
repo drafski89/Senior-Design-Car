@@ -100,6 +100,9 @@ PWMGen::~PWMGen()
         running = false;
         pthread_kill(pwm_thread, SIGCONT); // wake thread up if sleeping
         pthread_mutex_unlock(&write_lock);
+        
+        gpio.set_pin(pin, false);
+        gpio.disable_pin(pin);
     }
 
     pthread_join(pwm_thread, NULL);
@@ -110,6 +113,9 @@ void PWMGen::start()
 {
     if (!running)
     {
+        gpio.enable_pin(pin);
+        gpio.pin_direction(pin, PinType_t::OUT);
+        
         pthread_mutex_lock(&write_lock); // ensure nothing interrupts thread creation
         pthread_create(&pwm_thread, NULL, &pwm_loop, (void*)this);
         pthread_mutex_unlock(&write_lock);
@@ -128,6 +134,9 @@ void PWMGen::stop()
         running = false;
         pthread_kill(pwm_thread, SIGCONT); // wake thread up if sleeping
         pthread_mutex_unlock(&write_lock);
+        
+        gpio.set_pin(pin, false);
+        gpio.disable_pin(pin);
     }
     else
     {
