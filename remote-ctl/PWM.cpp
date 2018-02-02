@@ -12,8 +12,8 @@ void* pwm_loop(void* gen_ptr)
     while (generator->running)
     {
         // get values from class while mutex is locked
-        unsigned long period = generator->period + generator->period_offset;
-        unsigned long pulse_width = generator->pulse_width + generator->pulse_width_offset;
+        long period = generator->period /*+ generator->period_offset*/;
+        long pulse_width = generator->pulse_width /*+ generator->pulse_width_offset*/;
 
         // start pulse
         generator->gpio.set_pin(generator->pin, true);
@@ -24,7 +24,7 @@ void* pwm_loop(void* gen_ptr)
         // get time of rising edge
         struct timeval now;
         gettimeofday(&now, NULL);
-        unsigned long rising_edge_us = now.tv_sec * 1000000 + now.tv_usec;
+        long rising_edge_us = now.tv_sec * 1000000 + now.tv_usec;
 
         // wait
         int status = usleep(pulse_width);
@@ -39,20 +39,22 @@ void* pwm_loop(void* gen_ptr)
             continue;
         }
 
+        
         gettimeofday(&now, NULL);
-        unsigned long actual_sleep = (now.tv_sec * 1000000 + now.tv_usec) - rising_edge_us;
-
+        long falling_edge = now.tv_sec * 1000000 + now.tv_usec;
+        long actual_sleep = falling_edge - rising_edge_us;
+        
         // LOCK
         pthread_mutex_lock(&generator->write_lock);
 
-        unsigned long pulse_count = generator->pulse_count;
+        long pulse_count = generator->pulse_count;
         generator->pulse_width_offset = pulse_count * generator->pulse_width_offset / (pulse_count + 1) +
                                        (pulse_width - actual_sleep) / (pulse_count + 1);
 
         // UNLOCK
         pthread_mutex_unlock(&generator->write_lock);
-
-        status = usleep(period - actual_sleep);
+        
+        status = usleep(period - pulse_width);
 
         // if sleep was interrupted by SIGCONT, abort the loop
         if ((status == -1) && (errno == EINTR))
@@ -60,16 +62,16 @@ void* pwm_loop(void* gen_ptr)
             pthread_mutex_lock(&generator->write_lock);
             continue;
         }
-
+        
+        
         gettimeofday(&now, NULL);
-        unsigned long pulse_sleep = actual_sleep;
         actual_sleep = (now.tv_sec * 1000000 + now.tv_usec) - rising_edge_us;
-
+        
         // LOCK
         pthread_mutex_lock(&generator->write_lock);
 
         generator->period_offset = pulse_count * generator->period_offset / (pulse_count + 1) +
-                                  (period - (actual_sleep + pulse_sleep)) / (pulse_count + 1);
+                                  (period - actual_sleep) / (pulse_count + 1);
         generator->pulse_count++;
     }
 
@@ -118,6 +120,10 @@ void PWMGen::start()
         
         pthread_mutex_lock(&write_lock); // ensure nothing interrupts thread creation
         pthread_create(&pwm_thread, NULL, &pwm_loop, (void*)this);
+        
+        struct sched_param priority;
+        priority.sched_priority = 90;
+        pthread_setschedparam(pwm_thread, SCHED_FIFO, &priority);
         pthread_mutex_unlock(&write_lock);
     }
     else
@@ -150,13 +156,13 @@ GPIOCtl& PWMGen::get_gpio()
 }
 
 
-unsigned long PWMGen::get_period()
+long PWMGen::get_period()
 {
     return period;
 }
 
 
-unsigned long PWMGen::get_pulse_width()
+long PWMGen::get_pulse_width()
 {
     return pulse_width;
 }
@@ -166,20 +172,22 @@ HeaderPin_t PWMGen::get_pin()
     return pin;
 }
 
-void PWMGen::set_period(unsigned long period)
+void PWMGen::set_period(long period)
 {
     pthread_mutex_lock(&write_lock);
     this->period = period;
     pulse_count = 1;
+    pulse_width_offset = 0;
     period_offset = 0;
     pthread_mutex_unlock(&write_lock);
 }
 
-void PWMGen::set_pulse_width(unsigned long pulse_width)
+void PWMGen::set_pulse_width(long pulse_width)
 {
     pthread_mutex_lock(&write_lock);
     this->pulse_width = pulse_width;
     pulse_count = 1;
+    period_offset = 0;
     pulse_width_offset = 0;
     pthread_mutex_unlock(&write_lock);
 }
