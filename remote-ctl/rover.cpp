@@ -1,8 +1,10 @@
 #include "RemoteCtlApp.h"
 #include <string>
 #include <iostream>
+#include "PWM.h"
 
 using namespace std;
+using namespace jetsongpio;
 
 char* err_mesgs[] = {
     "No route to requested IP address",
@@ -89,6 +91,11 @@ int main(int argc, char* argv[])
     memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
 
     char mesg[DEFAULT_MESG_SIZE];
+    PWMGen generator;
+    generator.set_pin(HeaderPin_t::GPIO_37);
+    generator.set_pulse_width(1500);
+    generator.start();
+    int steering_offset = 500; // 500 microseconds
 
     while (bytes_recieved > -1)
     {
@@ -128,8 +135,12 @@ int main(int argc, char* argv[])
                    gamepad_state.axis_x, gamepad_state.axis_y, gamepad_state.axis_z,
                    gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
                    button);
+            
+            generator.set_pulse_width(1500 + (long)(gamepad_state.axis_x * ((double)steering_offset)));
         }
     }
+    
+    generator.stop();
 
     return EXIT_SUCCESS;
 }
