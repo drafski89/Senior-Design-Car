@@ -103,11 +103,12 @@ PWMGen::~PWMGen()
         pthread_kill(pwm_thread, SIGCONT); // wake thread up if sleeping
         pthread_mutex_unlock(&write_lock);
         
+        pthread_join(pwm_thread, NULL);
+        
         gpio.set_pin(pin, false);
         gpio.disable_pin(pin);
     }
 
-    pthread_join(pwm_thread, NULL);
     pthread_mutex_destroy(&write_lock);
 }
 
