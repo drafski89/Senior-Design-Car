@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <map>
 #include <unistd.h>
+#include <pthread.h>
 
 namespace jetsongpio
 {
@@ -48,12 +49,7 @@ enum PinType_t
  * basic parameters to eliminate, for instance, attempts to write to a pin that
  * is actually an input.
  */
-struct PinState
-{
-    bool enabled; ///< True when a pin has been exported / enabled successfully
-    int pin_type; ///< Tracks the pin type. Uses the values directly from PinType_t enum
-};
-
+struct PinState;
 
 /**
  * This class acts as a hardware abstract layer of sorts for dealing with the
@@ -63,7 +59,11 @@ class GPIOCtl
 {
 private:
     static std::map<HeaderPin_t, struct PinState> pin_states;
-    static ptread_mutex_t write_lock;
+    static pthread_mutex_t write_lock;
+    static bool initialized;
+
+    static void initialize();
+    static void cleanup();
 
     static int enable_pin(HeaderPin_t pin_num, GPIOCtl* requestor);
     static int disable_pin(HeaderPin_t pin_num, GPIOCtl* requestor);
@@ -81,6 +81,13 @@ public:
     void disable_pin(HeaderPin_t pin_num);
     void pin_direction(HeaderPin_t pin_num, PinType_t pin_type);
     void set_pin(HeaderPin_t pin_num, bool on);
+};
+
+struct PinState
+{
+    bool enabled; ///< True when a pin has been exported / enabled successfully
+    int pin_type; ///< Tracks the pin type. Uses the values directly from PinType_t enum
+    GPIOCtl* owner; ///< Tracks which object owns this pin to prevent clobbering and unauthroized access
 };
 
 } // end namespace
