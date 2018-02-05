@@ -43,9 +43,17 @@ int GPIOCtl::enable_pin(HeaderPin_t pin_num, GPIOCtl* requestor)
         return -1;
     }
 
-    if (!pin_state->enabled)
+    string enable_pin(SYSFS_GPIO_PATH"/gpio");
+    enable_pin += to_string((int)pin_num);
+
+    if (pin_state->enabled || (access(enable_pin.c_str(), F_OK) == 0))
     {
         printf("Info: GPIOCtl.enable(): pin %d is already enabled. Nothing to do\n", (int)pin_num);
+        pin_state->enabled = true;
+        if (pin_state->owner == NULL)
+        {
+            pin_state->owner = requestor;
+        }
         return 0;
     }
 
@@ -56,7 +64,7 @@ int GPIOCtl::enable_pin(HeaderPin_t pin_num, GPIOCtl* requestor)
         return errno;
     }
 
-    string enable_pin = to_string((int)pin_num);
+    enable_pin = to_string((int)pin_num);
 
     if (write(enable_file, enable_pin.c_str(), enable_pin.length()) == -1)
     {
@@ -86,6 +94,12 @@ int GPIOCtl::pin_direction(HeaderPin_t pin_num, PinType_t pin_type, GPIOCtl* req
     catch (exception& exc)
     {
         printf("Error: GPIOCtl.pin_direction(): invalid pin number: %d\n", (int)pin_type);
+        return -1;
+    }
+
+    if (!pin_state->enabled)
+    {
+        printf("Error: GPIOCtl.pin_direction(): pin %d is not enabled\n", (int)pin_num);
         return -1;
     }
 
@@ -139,6 +153,12 @@ int GPIOCtl::set_pin(HeaderPin_t pin_num, bool on, GPIOCtl* requestor)
         if (pin_state.pin_type != PinType_t::OUT)
         {
             printf("Error: GPIOCtl.set_pin(): %d is not an output pin\n", (int)pin_num);
+            return -1;
+        }
+
+        if (!pin_state.enabled)
+        {
+            printf("Error: GPIOCtl.set_pin(): pin %d is not enabled\n", (int)pin_num);
             return -1;
         }
 
@@ -291,6 +311,11 @@ void GPIOCtl::initialize()
 {
     if (!initialized)
     {
+        if (access(SYSFS_GPIO_PATH"/export", R_OK | W_OK) == -1)
+        {
+            throw runtime_error(SYSFS_GPIO_PATH"/export: access denied. GPIO requires root privelege");
+        }
+
         struct PinState pin_init_state;
         pin_init_state.enabled = false;
         pin_init_state.pin_type = PinType_t::IN;
@@ -317,7 +342,25 @@ void GPIOCtl::cleanup()
 {
     if (initialized)
     {
+        pthread_mutex_lock(&write_lock);
+
+        for (auto& pin : pin_states)
+        {
+            if (pin.second.enabled)
+            {
+                if (pin.second.pin_type == PinType_t::OUT)
+                {
+                    set_pin(pin.first, false, NULL);
+                }
+
+                disable_pin(pin.first, NULL);
+            }
+        }
+
         initialized = false;
+
+        pthread_mutex_unlock(&write_lock);
+        pthread_mutex_destroy(&write_lock);
     }
     else
     {
