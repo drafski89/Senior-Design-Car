@@ -57,7 +57,7 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
 
 ArduinoPWM::ArduinoPWM()
 {
-    uart_gateway = open("/dev/ttyUSB0", O_RDWR);
+    uart_gateway = open("/dev/ttyS0", O_RDWR);
 
     if (uart_gateway == -1)
     {
@@ -73,11 +73,17 @@ ArduinoPWM::ArduinoPWM()
         throw runtime_error("tcgetattr(): failed to get serial line attributes");
     }
 
-    if (cfsetspeed(&uart_props, B9600) == -1)
+    if (cfsetspeed(&uart_props, B4800) == -1)
     {
         printf("Error: ArduinoPWM(): cfsetspeed(): failed to set serial line speed: %d\n", errno);
         close(uart_gateway);
         throw runtime_error("cfsetspeed(): failed to set serial line speed");
+    }
+    
+    if (tcsetattr(uart_gateway, TCSANOW, &uart_props) == -1)
+    {
+        close(uart_gateway);
+        throw runtime_error("tcsetattr(): failed to set serial line properties");
     }
 
     cfmakeraw(&uart_props);
