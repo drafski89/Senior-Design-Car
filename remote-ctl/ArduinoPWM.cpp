@@ -3,6 +3,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <exception>
+#include <stdexcept>
 
 using namespace std;
 
@@ -19,7 +22,6 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
         {
             struct PWMMesg mesg = arduino_pwm->mesg_queue.front();
             arduino_pwm->mesg_queue.pop();
-            running = arduino_pwm->running;
 
             pthread_mutex_unlock(&arduino_pwm->write_lock);
 
@@ -40,6 +42,14 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
         {
             pthread_mutex_unlock(&arduino_pwm->write_lock);
         }
+
+        // sleep until new data arrives
+        pthread_cond_wait(&arduino_pwm->new_mesg_sig, &arduino_pwm->new_mesg_lock);
+
+        // could have been waiting for a while. check for exit condition
+        pthread_mutex_lock(&arduino_pwm->write_lock);
+        running = arduino_pwm->running;
+        pthread_mutex_unlock(&arduino_pwm->write_lock);
     }
 
     return NULL;
@@ -53,27 +63,54 @@ ArduinoPWM::ArduinoPWM()
     {
         printf("Error: ArduinoPWM(): open(): failed to open serial line: %d\n", errno);
         uart_gateway = 0;
-        return;
+        throw runtime_error("open(): failed to open serial line");
     }
 
     if (tcgetattr(uart_gateway, &uart_props) == -1)
     {
         printf("Error: ArduinoPWM(): tcgetattr(): failed to get serial line attributes: %d\n", errno);
-        return;
+        close(uart_gateway);
+        throw runtime_error("tcgetattr(): failed to get serial line attributes");
     }
 
     if (cfsetspeed(&uart_props, B9600) == -1)
     {
         printf("Error: ArduinoPWM(): cfsetspeed(): failed to set serial line speed: %d\n", errno);
-        return;
+        close(uart_gateway);
+        throw runtime_error("cfsetspeed(): failed to set serial line speed");
     }
 
     cfmakeraw(&uart_props);
 
-    pthread_mutex_init(&write_lock, NULL);
-    pthread_create(&send_mesg_thread, NULL, &send_mesg_loop, (void*)this);
+    if (pthread_mutex_init(&write_lock, NULL) == -1)
+    {
+        printf("Error: ArduinoPWM(): pthread_mutex_init(): failed to initialize ArduinoPWM::write_lock mutex: %d\n", errno);
+        close(uart_gateway);
+        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoPWM::write_lock mutex");
+    }
+
+    if (pthread_mutex_init(&new_mesg_lock, NULL) == -1)
+    {
+        printf("Error: ArduinoPWM(): pthread_mutex_init(): failed to initialize ArduinoPWM::new_mesg_lock mutex: %d\n", errno);
+        close(uart_gateway);
+        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoPWM::new_mesg_lock mutex");
+    }
+
+    if (pthread_cond_init(&new_mesg_sig, NULL) == -1)
+    {
+        printf("Error: ArduinoPWM(): pthread_cond_init(): failed to initialize ArduinoPWM::new_mesg_sig condition: %d\n", errno);
+        close(uart_gateway);
+        throw runtime_error("pthread_cond_init(): failed to initialize ArduinoPWM::new_mesg_sig condition");
+    }
 
     running = true;
+
+    if (pthread_create(&send_mesg_thread, NULL, &send_mesg_loop, (void*)this) == -1)
+    {
+        printf("Error: ArduinoPWM(): pthread_create(): failed to create background transfer thread: %d\n", errno);
+        close(uart_gateway);
+        throw runtime_error("pthread_create(): failed to create background transfer thread");
+    }
 }
 
 ArduinoPWM::~ArduinoPWM()
@@ -84,7 +121,13 @@ ArduinoPWM::~ArduinoPWM()
         running = false;
         pthread_mutex_unlock(&write_lock);
 
+        pthread_cond_signal(&new_mesg_sig);
+
         pthread_join(send_mesg_thread, NULL);
+
+        pthread_cond_destroy(&new_mesg_sig);
+        pthread_mutex_destroy(&write_lock);
+        pthread_mutex_destroy(&new_mesg_lock);
     }
 
     if (uart_gateway)
@@ -217,6 +260,8 @@ int ArduinoPWM::send_mesg(int address, void* buf, int size)
     mesg_queue.push(mesg);
     pthread_mutex_unlock(&write_lock);
 
+    pthread_cond_signal(&new_mesg_sig);
+
     return 0;
 }
 
@@ -238,6 +283,8 @@ int ArduinoPWM::send_mesg(struct PWMMesg& mesg)
     pthread_mutex_lock(&write_lock);
     mesg_queue.push(mesg);
     pthread_mutex_unlock(&write_lock);
+
+    pthread_cond_signal(&new_mesg_sig);
 
     return 0;
 }

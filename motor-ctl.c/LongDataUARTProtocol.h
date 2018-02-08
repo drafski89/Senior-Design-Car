@@ -20,10 +20,8 @@ struct LDProtocol
     char bytes_total;
     char packets_total;
     char packets_current;
-    unsigned char checksum;
 
     unsigned char mesg_buffer[18];
-    char buffer[MAX_MESG_SIZE];
 
     char mailbox_sizes[8];
     unsigned char* mailboxes[8];
@@ -36,7 +34,5 @@ void register_mailbox(char which, void* mailbox, char size, struct LDProtocol* p
 char bytes_to_packets(char bytes);
 
 void recieve_message(struct LDProtocol* proto_handle);
-
-void ldproto_state_machine(struct LDProtocol* proto_handle);
 
 #endif

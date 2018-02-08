@@ -34,6 +34,8 @@ private:
     std::queue<struct PWMMesg> mesg_queue;
 
     pthread_mutex_t write_lock;
+    pthread_cond_t new_mesg_sig;
+    pthread_mutex_t new_mesg_lock; ///< dummy mutex. required to use pthread conditions but this class manages its own mutexes for finer control
     pthread_t send_mesg_thread;
 
 public:
