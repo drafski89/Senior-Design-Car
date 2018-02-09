@@ -1,10 +1,11 @@
 #include "RemoteCtlApp.h"
 #include <string>
 #include <iostream>
-#include "PWM.h"
+#include "ArduinoPWM.h"
+#include <cstdlib>
+#include <cmath>
 
 using namespace std;
-using namespace jetsongpio;
 
 char* err_mesgs[] = {
     "No route to requested IP address",
@@ -91,11 +92,9 @@ int main(int argc, char* argv[])
     memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
 
     char mesg[DEFAULT_MESG_SIZE];
-    PWMGen generator;
-    generator.set_pin(HeaderPin_t::GPIO_37);
-    generator.set_pulse_width(1500);
-    generator.start();
-    int steering_offset = 500; // 500 microseconds
+    ArduinoPWM pwm_gateway;
+    short drive_power = 1500;
+    short steering_angle = 1500;
 
     while (bytes_recieved > -1)
     {
@@ -136,11 +135,43 @@ int main(int argc, char* argv[])
                    gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
                    button);
             
-            generator.set_pulse_width(1500 + (long)(gamepad_state.axis_x * ((double)steering_offset)));
+            if (abs(gamepad_state.axis_x) > 0.2)
+            {
+                steering_angle = (short)(gamepad_state.axis_x * 500.0 + 1500.0);
+            }
+            else
+            {
+                steering_angle = 1500;
+            }
+
+            if (abs(gamepad_state.axis_pitch) > 0.3)
+            {
+                double axis_pitch_adj = -gamepad_state.axis_pitch;
+                if (axis_pitch_adj < 0)
+                {
+                    axis_pitch_adj = (axis_pitch_adj + 0.3) / 0.7;
+                }
+                else
+                {
+                    axis_pitch_adj = (axis_pitch_adj - 0.3) / 0.7;
+                }
+                
+                drive_power = (short)(axis_pitch_adj * 100.0 + 1500.0);
+            }
+            else
+            {
+                drive_power = 1500;
+            }
+            
+            pwm_gateway.send_mesg(0, (void*)&drive_power, sizeof(short));
+            pwm_gateway.send_mesg(1, (void*)&steering_angle, sizeof(short));
         }
     }
     
-    generator.stop();
+    drive_power = 1500;
+    steering_angle = 1500;
+    pwm_gateway.send_mesg(0, (void*)&drive_power, sizeof(short));
+    pwm_gateway.send_mesg(1, (void*)&steering_angle, sizeof(short));
 
     return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
 {
     ArduinoPWM* arduino_pwm = (ArduinoPWM*)arduino_pwm_ptr;
     bool running = arduino_pwm->running;
+    bool empty = false;
 
     while (running)
     {
@@ -22,6 +23,7 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
         {
             struct PWMMesg mesg = arduino_pwm->mesg_queue.front();
             arduino_pwm->mesg_queue.pop();
+            empty = arduino_pwm->mesg_queue.empty();
 
             pthread_mutex_unlock(&arduino_pwm->write_lock);
 
@@ -37,6 +39,8 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
             {
                 printf("Error: ArduinoPWM::send_mesg_loop(): failed to send message checksum: %d\n", errno);
             }
+            
+            //usleep(50000);
         }
         else
         {
@@ -44,7 +48,10 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
         }
 
         // sleep until new data arrives
-        pthread_cond_wait(&arduino_pwm->new_mesg_sig, &arduino_pwm->new_mesg_lock);
+        if (empty)
+        {
+            pthread_cond_wait(&arduino_pwm->new_mesg_sig, &arduino_pwm->new_mesg_lock);
+        }
 
         // could have been waiting for a while. check for exit condition
         pthread_mutex_lock(&arduino_pwm->write_lock);
@@ -261,7 +268,7 @@ int ArduinoPWM::send_mesg(int address, void* buf, int size)
         return -1;
     }
 
-    display_mesg(mesg);
+    //display_mesg(mesg);
     pthread_mutex_lock(&write_lock);
     mesg_queue.push(mesg);
     pthread_mutex_unlock(&write_lock);

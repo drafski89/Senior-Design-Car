@@ -301,7 +301,7 @@ void RemoteCtlApp::_loop()
 
     _connect_handler();
 
-    if (ctime_ms - last_broadcast >= 20)
+    if (ctime_ms - last_broadcast >= 100)
     {
         _tx_handler();
 
