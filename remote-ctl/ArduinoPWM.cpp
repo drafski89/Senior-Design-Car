@@ -39,7 +39,7 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
             {
                 printf("Error: ArduinoPWM::send_mesg_loop(): failed to send message checksum: %d\n", errno);
             }
-            
+
             //usleep(50000);
         }
         else
@@ -86,7 +86,7 @@ ArduinoPWM::ArduinoPWM()
         close(uart_gateway);
         throw runtime_error("cfsetspeed(): failed to set serial line speed");
     }
-    
+
     if (tcsetattr(uart_gateway, TCSANOW, &uart_props) == -1)
     {
         close(uart_gateway);
@@ -149,7 +149,7 @@ ArduinoPWM::~ArduinoPWM()
     }
 }
 
-int ArduinoPWM::buf_to_mesg(struct PWMMesg& mesg, int address, void* buf, int size)
+int ArduinoPWM::buf_to_mesg(struct PWMMesg& mesg, int address, const void* buf, int size)
 {
     if (address >= MAX_ADDR || address < 0)
     {
@@ -198,7 +198,7 @@ int ArduinoPWM::buf_to_mesg(struct PWMMesg& mesg, int address, void* buf, int si
     return 0;
 }
 
-void display_mesg(struct PWMMesg& mesg)
+void display_mesg(const struct PWMMesg& mesg)
 {
     for (int bit = 0; bit < 8; bit++)
     {
@@ -258,7 +258,7 @@ void display_mesg(struct PWMMesg& mesg)
     printf("\n");
 }
 
-int ArduinoPWM::send_mesg(int address, void* buf, int size)
+int ArduinoPWM::send_mesg(int address, const void* buf, int size)
 {
     struct PWMMesg mesg;
     memset(&mesg, 0, sizeof(struct PWMMesg));
@@ -278,7 +278,7 @@ int ArduinoPWM::send_mesg(int address, void* buf, int size)
     return 0;
 }
 
-int ArduinoPWM::send_mesg(struct PWMMesg& mesg)
+int ArduinoPWM::send_mesg(const struct PWMMesg& mesg)
 {
     if (mesg.address >= MAX_ADDR)
     {

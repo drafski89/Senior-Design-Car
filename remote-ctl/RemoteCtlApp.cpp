@@ -217,27 +217,27 @@ void RemoteCtlApp::_event(SDL_Event* event)
 
             if (event->jaxis.axis == 0)
             {
-                gamepad_state.axis_x = axis_val;
+                gamepad_state.axis_lx = axis_val;
             }
             else if (event->jaxis.axis == 1)
             {
-                gamepad_state.axis_y = axis_val;
+                gamepad_state.axis_ly = axis_val;
             }
             else if (event->jaxis.axis == 2)
             {
-                gamepad_state.axis_z = axis_val;
+                gamepad_state.axis_lt = axis_val;
             }
             else if (event->jaxis.axis == 3)
             {
-                gamepad_state.axis_yaw = axis_val;
+                gamepad_state.axis_rx = axis_val;
             }
             else if (event->jaxis.axis == 4)
             {
-                gamepad_state.axis_pitch = axis_val;
+                gamepad_state.axis_ry = axis_val;
             }
             else if (event->jaxis.axis == 5)
             {
-                gamepad_state.axis_roll = axis_val;
+                gamepad_state.axis_rt = axis_val;
             }
         }
         break;

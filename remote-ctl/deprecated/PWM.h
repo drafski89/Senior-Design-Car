@@ -8,6 +8,10 @@
 #include <pthread.h>
 
 /**
+ * THIS CLASS IS DEPRECATED! DO NOT USE!
+ *
+ * Please refer to and use the ArduinoPWM class.
+ *
  * The PWMGen class is used for generating PWM signals on the GPIO pins of the
  * Jetson. By default, this class generates a servo PWM signal with a period of
  * 10.0 ms and a pulse width of 1.5 ms on the number 29 pin of the Jetson's
@@ -95,7 +99,7 @@ public:
      */
     ~PWMGen();
 
-    void start(); ///< Starts the PWM generation thread. MUST BE CALLED FOR A PWM SIGNAL TO BE GENERATED!
+    void start(); ///< Starts the PWM generation thread. MUST be called for PWM signal to be generated.
     void stop();  ///< Stops the PWM generation thread, sets pin to low, and disables it. Must be called before changing pin.
 
     long get_period();                 ///< Get the period in microseconds of this PWM signal
@@ -107,7 +111,7 @@ public:
 
     void set_period(long period);              ///< Set the period in microseconds of this PWM signal. May be done on the fly
     void set_pulse_width(long pulse_width);    ///< Set the pulse width in microseconds of this PWM signal May be done on the fly
-    void set_pin(jetsongpio::HeaderPin_t pin); ///< Change the pin this signal is generated on. SIGNAL GENERATION MUST NOT BE ACTIVE!
+    void set_pin(jetsongpio::HeaderPin_t pin); ///< Change the pin this signal is generated on. Signal generation must NOT be active.
 };
 
 #endif

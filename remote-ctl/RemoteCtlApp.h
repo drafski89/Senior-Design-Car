@@ -27,14 +27,30 @@
  */
 struct GamepadState
 {
-    double axis_x; ///< Horizontal axis of left stick. Range [-1, 1]. -1 is full left.
-    double axis_y; ///< Vertical axis of left stick. Range [-1, 1]. -1 is full up.
-    double axis_z;
+    double axis_lx; ///< Horizontal axis of left stick. Range [-1, 1]. -1 is full left.
+    double axis_ly; ///< Vertical axis of left stick. Range [-1, 1]. -1 is full up.
+    double axis_lt; ///< Left trigger axis. Range [-1, 1]. -1 is trigger fully released.
 
-    double axis_yaw;
-    double axis_pitch;
-    double axis_roll;
+    double axis_rx; ///< Horizontal axis of right stick. Range [-1, 1]. -1 is full left.
+    double axis_ry; ///< Vertical axis of right stick. Range [1-, 1]. -1 is full up.
+    double axis_rt; ///< Right trigger axis. Range [-1, 1]. -1 is trigger fully released.
 
+    /**
+     * Button map:
+     *
+     * Button -> Index
+     * A     - 0
+     * B     - 1
+     * X     - 2
+     * Y     - 3
+     * LB    - 4
+     * RB    - 5
+     * Back  - 6
+     * Start - 7
+     * Xbox  - 8
+     * LS    - 9
+     * RS    - 10
+     */
     char button[32]; ///< button's number is its index into the array. Boolean: 0 or 1. 1 is pressed.
 };
 
