@@ -2,164 +2,124 @@
 
 using namespace std;
 
-RemoteCtlApp::RemoteCtlApp() : running(true), last_refresh(0), last_broadcast(0),
-                               gamepad(0), sdl_gamepad(NULL), robot_socket(0)
+void* connect_handler(void* app_ptr)
 {
-    memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
-}
+    RemoteCtlApp* app = (RemoteCtlApp*)app_ptr;
 
-int RemoteCtlApp::_init_tcp()
-{
-    printf("Setting up TCP socket for robots...\n");
+    pthread_mutex_lock(&app->write_lock);
+    bool running = app->running;
+    pthread_mutex_unlock(&app->write_lock);
 
-    // create new internet socket, TCP protocol, infer correct protocol
-    robot_socket = socket(AF_INET, SOCK_STREAM, 0);
-
-    if (!robot_socket)
-    {
-        robot_socket = 0;
-        printf("Failed to create TCP socket. Error: 0x%08x\n", errno);
-        return errno;
-    }
-
-    struct sockaddr_in socket_addr;
-    socket_addr.sin_family = AF_INET;         // internet type socket
-    socket_addr.sin_port = htons(5309);       // port 5309. need to use correct byte order
-    socket_addr.sin_addr.s_addr = INADDR_ANY; // use this machine's IP address
-
-    printf("TCP socket created. Binding to port 5309...\n");
-
-    // will not compile without that wierd looking type cast
-    if (bind(robot_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)))
-    {
-        close(robot_socket);
-        robot_socket = 0;
-        printf("Failed to bind TCP socket to port. Error: 0x%08x\n", errno);
-        return errno;
-    }
-
-    printf("TCP socket bound to port. Opening for connections...\n");
-
-    // open the socket for at least one connection
-    if (listen(robot_socket, 1))
-    {
-        close(robot_socket);
-        robot_socket = 0;
-        printf("Failed to open TCP socket for connections. Error: 0x%08x\n", errno);
-        return errno;
-    }
-
-    // set socket to nonblocking to avoid stopping whole application when handling connections
-    int sock_flags = fcntl(robot_socket, F_GETFL, NULL);
-
-    if (sock_flags < 0)
-    {
-        close(robot_socket);
-        robot_socket = 0;
-        printf("Failed to fetch socket options. fcntl(): F_GETFL error: 0x08%x\n", errno);
-        return errno;
-    }
-
-    sock_flags |= O_NONBLOCK;
-    if (fcntl(robot_socket, F_SETFL, sock_flags) == -1)
-    {
-        close(robot_socket);
-        robot_socket = 0;
-        printf("Failed to set socket options. fcntl(): F_SETFL error: 0x08%x\n", errno);
-        return errno;
-    }
-
-    return EXIT_SUCCESS;
-}
-
-void RemoteCtlApp::_connect_handler()
-{
-    if (robot_socket)
+    while (running)
     {
         struct sockaddr_in connection_addr;
         memset((void*)&connection_addr, 0, sizeof(struct sockaddr_in));
 
         socklen_t addr_bytes = sizeof(struct sockaddr_in);
-        int connection_sock = accept(robot_socket, (struct sockaddr*)&connection_addr, &addr_bytes);
+        int connection_sock = accept(app->robot_socket, (struct sockaddr*)&connection_addr, &addr_bytes);
 
-        if (connection_sock == -1)
+        if (connection_sock < 0)
         {
-            if ((errno != EAGAIN) && (errno != EWOULDBLOCK))
-            {
-                printf("Error establishing new connection. accept() error 0x08%x\n", errno);
-            }
+            printf("Error establishing new connection. accept() error: %d", errno);
         }
         else
         {
-            printf("New connection from %s\n", inet_ntoa(connection_addr.sin_addr));
-            connections.push_back(pair<int, struct sockaddr_in>(connection_sock, connection_addr));
-        }
-    }
-}
+            printf("New connection from %s. ", inet_ntoa(connection_addr.sin_addr));
 
-void RemoteCtlApp::_tx_handler()
-{
-    for (auto iter = connections.begin(); iter != connections.end(); )
-    {
-        pair<int, struct sockaddr_in>& connection = *iter;
-        int connection_sock = connection.first;
+            pthread_mutex_lock(&app->write_lock);
 
-        char mesg[DEFAULT_MESG_SIZE];
-        memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
-        memcpy((void*)mesg, (void*)&gamepad_state, sizeof(struct GamepadState));
-
-        int bytes_sent = send(connection_sock, (void*)mesg, DEFAULT_MESG_SIZE, MSG_NOSIGNAL);
-
-        if (bytes_sent == -1)
-        {
-            if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+            if (app->connection) // if already connected
             {
-                // do nothing. this is okay.
-            }
-            else if (errno == ECONNRESET)
-            {
-                printf("Lost connection to %s. Reset by peer.\n", inet_ntoa(connection.second.sin_addr));
+                printf("Already connected. Refusing\n");
                 close(connection_sock);
-                iter = connections.erase(iter);
-                continue;
-            }
-            else if (errno == ENOTCONN)
-            {
-                printf("Lost connection to %s. Dropped.\n", inet_ntoa(connection.second.sin_addr));
-                close(connection_sock);
-                iter = connections.erase(iter);
-                continue;
-            }
-            else if (errno == EPIPE)
-            {
-                printf("Lost connection %s. Connection unexpectedly closed.\n", inet_ntoa(connection.second.sin_addr));
-                close(connection_sock);
-                iter = connections.erase(iter);
-                continue;
             }
             else
             {
-                printf("Unable to send to %s. send() error 0x08%x. Terminating connection.\n",
-                       inet_ntoa(connection.second.sin_addr), errno);
-                close(connection_sock);
-                iter = connections.erase(iter);
-                continue;
+                printf("\n");
+                app->connection = new pair<int, struct sockaddr_in>(connection_sock, connection_addr);
+            }
+
+            running = app->running;
+            pthread_mutex_unlock(&app->write_lock);
+        }
+    }
+
+    return NULL;
+}
+
+void* tx_handler(void* app_ptr)
+{
+    RemoteCtlApp* app = (RemoteCtlApp*)app_ptr;
+
+    bool running = app->running;
+
+    struct timeval systime;
+    gettimeofday(&systime, NULL);
+    long start_time = systime.tv_sec * 1000000 + systime.tv_usec;
+
+    while (running)
+    {
+        if (app->connection)
+        {
+            char mesg[DEFAULT_MESG_SIZE];
+            memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
+
+            pthread_mutex_lock(&app->write_lock);
+            memcpy((void*)mesg, (void*)&app->gamepad_state, sizeof(struct GamepadState));
+            pthread_mutex_unlock(&app->write_lock);
+
+            int bytes_sent = send(app->connection->first, (void*)mesg, DEFAULT_MESG_SIZE, MSG_NOSIGNAL);
+
+            if (bytes_sent == -1)
+            {
+                if (errno == ECONNRESET)
+                {
+                    printf("Error sending gamepad state to %s. Connection reset by peer.\n",
+                           inet_ntoa(app->connection->second.sin_addr));
+                }
+                else if (errno == EPIPE || errno == ENOTCONN)
+                {
+                    printf("Error sending gamepad state to %s. Connection dropped.\n",
+                           inet_ntoa(app->connection->second.sin_addr));
+                }
+                else
+                {
+                    printf("Error sending gamepad state to %s. Unhandled tx error: %d. Dropping connection.\n",
+                           inet_ntoa(app->connection->second.sin_addr), errno);
+                }
+
+                close(app->connection->first);
+                delete app->connection;
+                app->connection = NULL;
             }
         }
 
-        iter++;
+        gettimeofday(&systime, NULL);
+        long current_time = systime.tv_sec * 1000000 + systime.tv_usec;
+
+        usleep(20 * 1000 - (current_time - start_time)); // send at 50 Hz
+
+        gettimeofday(&systime, NULL);
+        start_time = systime.tv_sec * 1000000 + systime.tv_usec;
+
+        pthread_mutex_lock(&app->write_lock);
+        running = app->running;
+        pthread_mutex_unlock(&app->write_lock);
     }
+
+    return NULL;
 }
 
-int RemoteCtlApp::_init_sdl()
+RemoteCtlApp::RemoteCtlApp()
 {
+    connection = NULL;
+
     int status = 0;
-    // SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     status = SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS);
 
     if (status < 0)
     {
-        return status;
+        throw runtime_error(string("Failed to initialize SDL input library. SDL error: ") + to_string(status));
     }
 
     int joysticks_num = SDL_NumJoysticks();
@@ -167,7 +127,8 @@ int RemoteCtlApp::_init_sdl()
 
     if (joysticks_num >= 1)
     {
-        printf("Attempting to use joystick 0x%02x\n", gamepad);
+        gamepad = 0;
+        printf("Attempting to use joystick %d\n", gamepad);
         sdl_gamepad = SDL_JoystickOpen(gamepad);
         SDL_JoystickEventState(SDL_ENABLE);
 
@@ -186,10 +147,111 @@ int RemoteCtlApp::_init_sdl()
     }
     else
     {
-        printf("No usable input devices detected.\n");
+        throw runtime_error("No usable input devices detected.");
     }
 
-    return status;
+    memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
+
+    printf("Setting up TCP socket for robots...\n");
+
+    // create new internet socket, TCP protocol, infer correct protocol
+    robot_socket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (robot_socket < 0)
+    {
+        robot_socket = 0;
+        throw runtime_error(string("Failed to create TCP socket. Error: ") + to_string(errno));
+    }
+
+    struct sockaddr_in socket_addr;
+    socket_addr.sin_family = AF_INET;         // internet type socket
+    socket_addr.sin_port = htons(5309);       // port 5309. need to use correct byte order
+    socket_addr.sin_addr.s_addr = INADDR_ANY; // use this machine's IP address
+
+    printf("TCP socket created. Binding to port 5309...\n");
+
+    // will not compile without that wierd looking type cast
+    if (bind(robot_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to bind TCP socket to port. Error: ") + to_string(errno));
+    }
+
+    printf("TCP socket bound to port. Opening for connections...\n");
+
+    // open the socket for at least one connection
+    if (listen(robot_socket, 1) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to open TCP socket for connections. Error: ") + to_string(errno));
+    }
+
+    int timeout = 1500; // 1500 milliseconds
+    if (setsockopt(robot_socket, IPPROTO_TCP, TCP_USER_TIMEOUT, &timeout, sizeof(int)) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to set socket options. setsockopt(): TCP_USER_TIMEOUT error: ") + to_string(errno));
+    }
+
+    if (pthread_mutex_init(&write_lock, NULL) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to create write protection mutex. Error: ") + to_string(errno));
+    }
+
+    running = true;
+
+    if (pthread_create(&connect_thread, NULL, &connect_handler, (void*)this) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to create connection handler thread. Error: ") + to_string(errno));
+    }
+
+    if (pthread_create(&tx_thread, NULL, &tx_handler, (void*)this) == -1)
+    {
+        pthread_mutex_lock(&write_lock);
+        running = false;
+        pthread_mutex_unlock(&write_lock);
+
+        pthread_cancel(connect_thread);
+        pthread_join(connect_thread, NULL);
+
+        pthread_mutex_destroy(&write_lock);
+
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to create tx handler thread. Error: ") + to_string(errno));
+    }
+}
+
+RemoteCtlApp::~RemoteCtlApp()
+{
+    if (running)
+    {
+        pthread_mutex_lock(&write_lock);
+        running = false;
+        pthread_mutex_unlock(&write_lock);
+
+        pthread_cancel(connect_thread);
+        pthread_join(connect_thread, NULL);
+        pthread_join(tx_thread, NULL);
+
+        pthread_mutex_destroy(&write_lock);
+        close(robot_socket);
+
+        SDL_Quit();
+    }
+
+    if (connection)
+    {
+        close(connection->first);
+        delete connection;
+    }
 }
 
 void RemoteCtlApp::_event(SDL_Event* event)
@@ -198,22 +260,26 @@ void RemoteCtlApp::_event(SDL_Event* event)
     {
     case SDL_QUIT:
         printf("\nUser requested exit. Closing...\n");
+        pthread_mutex_lock(&write_lock);
         running = false;
+        pthread_mutex_unlock(&write_lock);
         break;
 
     case SDL_APP_TERMINATING:
         printf("\nInterrupt signal recieved. Terminating...\n");
+        pthread_mutex_unlock(&write_lock);
         running = false;
+        pthread_mutex_unlock(&write_lock);
         break;
 
     case SDL_JOYAXISMOTION:
-        //if (event->jaxis.which == gamepad)
-        if (true)
+        if (event->jaxis.which == gamepad)
         {
             int value = event->jaxis.value;
             if (value > 0) { value += 1; } // limit of short is 32,767. increment to make division by 32768 equal 1
 
             double axis_val = (double)value / 32768.0;
+            pthread_mutex_lock(&write_lock);
 
             if (event->jaxis.axis == 0)
             {
@@ -239,27 +305,32 @@ void RemoteCtlApp::_event(SDL_Event* event)
             {
                 gamepad_state.axis_rt = axis_val;
             }
+
+            pthread_mutex_unlock(&write_lock);
         }
         break;
 
     case SDL_JOYBUTTONDOWN:
-        //if (event->jbutton.which == gamepad)
-        if (true)
+        if (event->jbutton.which == gamepad)
         {
             if (event->jbutton.button < 32)
             {
+                pthread_mutex_lock(&write_lock);
                 gamepad_state.button[event->jbutton.button] = (char)0x01;
+                pthread_mutex_unlock(&write_lock);
             }
         }
+
         break;
 
     case SDL_JOYBUTTONUP:
-        //if (event->jbutton.which == gamepad)
-        if (true)
+        if (event->jbutton.which == gamepad)
         {
             if (event->jbutton.button < 32)
             {
+                pthread_mutex_lock(&write_lock);
                 gamepad_state.button[event->jbutton.button] = (char)0x00;
+                pthread_mutex_unlock(&write_lock);
             }
         }
         break;
@@ -269,69 +340,8 @@ void RemoteCtlApp::_event(SDL_Event* event)
     }
 }
 
-void RemoteCtlApp::_loop()
-{
-    struct timeval current_time;
-    memset((void*)&current_time, 0, sizeof(struct timeval));
-
-    gettimeofday(&current_time, NULL);
-
-    unsigned long ctime_ms = current_time.tv_sec * 1000 +
-                             current_time.tv_usec / 1000;
-
-    /*
-    if (ctime_ms - last_refresh >= 200)
-    {
-        char button[33];
-        button[32] = '\0';
-
-        for (int index = 0; index < 32; index++)
-        {
-            button[index] = gamepad_state.button[index] + 0x30;
-        }
-
-        printf("X: %06.4g    Y: %06.4g    Z: %06.4g    Y: %06.4g    P: %06.4g    R: %06.4g    %s\r",
-               gamepad_state.axis_x, gamepad_state.axis_y, gamepad_state.axis_z,
-               gamepad_state.axis_yaw, gamepad_state.axis_pitch, gamepad_state.axis_roll,
-               button);
-
-        last_refresh = ctime_ms;
-    }
-    */
-
-    _connect_handler();
-
-    if (ctime_ms - last_broadcast >= 100)
-    {
-        _tx_handler();
-
-        last_broadcast = ctime_ms;
-    }
-}
-
-void RemoteCtlApp::_cleanup()
-{
-    SDL_Quit();
-}
-
 int RemoteCtlApp::execute()
 {
-    // initialize SDL library. exit immediately if a failure occurs
-    int status = _init_sdl();
-    if (status < 0)
-    {
-        printf("Failed to initialize SDL input library. Error 0x%08x\n", status);
-        return status;
-    }
-
-    status = _init_tcp();
-    if (status)
-    {
-        printf("\n"
-               "*** Creating TCP socket failed! Robot will not be able to connect! ***\n"
-               "\n");
-    }
-
     SDL_Event event;
 
     // while the user has no closed the application
@@ -342,13 +352,7 @@ int RemoteCtlApp::execute()
         {
             _event(&event);
         }
-
-        // process data and send to robot
-        _loop();
     }
-
-    // shutdown SDL library
-    _cleanup();
 
     return EXIT_SUCCESS;
 }
