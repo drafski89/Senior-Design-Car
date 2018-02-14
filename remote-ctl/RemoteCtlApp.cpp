@@ -231,21 +231,18 @@ RemoteCtlApp::RemoteCtlApp()
 
 RemoteCtlApp::~RemoteCtlApp()
 {
-    if (running)
-    {
-        pthread_mutex_lock(&write_lock);
-        running = false;
-        pthread_mutex_unlock(&write_lock);
+    pthread_mutex_lock(&write_lock);
+    running = false;
+    pthread_mutex_unlock(&write_lock);
 
-        pthread_cancel(connect_thread);
-        pthread_join(connect_thread, NULL);
-        pthread_join(tx_thread, NULL);
+    pthread_cancel(connect_thread);
+    pthread_join(connect_thread, NULL);
+    pthread_join(tx_thread, NULL);
 
-        pthread_mutex_destroy(&write_lock);
-        close(robot_socket);
+    pthread_mutex_destroy(&write_lock);
+    close(robot_socket);
 
-        SDL_Quit();
-    }
+    SDL_Quit();
 
     if (connection)
     {
