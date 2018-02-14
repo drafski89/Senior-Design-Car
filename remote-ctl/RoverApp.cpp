@@ -207,7 +207,7 @@ void RoverApp::recieve_cmds()
                 button[index] = gamepad_state.button[index] + 0x30;
             }
 
-            printf("LX: %+06.4g    LY: %+06.4g    LT: %+06.4g    RX: %+06.4g    RY: %+06.4g    RT: %+06.4g    %s\r",
+            printf("LX: % 6.04f    LY: % 6.04f    LT: % 6.04f    RX: % 6.04f    RY: % 6.04f    RT: % 6.04f    %s\r",
                    gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
                    gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
                    button);
