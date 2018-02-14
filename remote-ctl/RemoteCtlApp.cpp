@@ -97,7 +97,7 @@ void* tx_handler(void* app_ptr)
         gettimeofday(&systime, NULL);
         long current_time = systime.tv_sec * 1000000 + systime.tv_usec;
 
-        usleep(20 * 1000 - (current_time - start_time)); // send at 50 Hz
+        usleep(10 * 1000 - (current_time - start_time)); // send at 100 Hz
 
         gettimeofday(&systime, NULL);
         start_time = systime.tv_sec * 1000000 + systime.tv_usec;
@@ -170,6 +170,14 @@ RemoteCtlApp::RemoteCtlApp()
 
     printf("TCP socket created. Binding to port 5309...\n");
 
+    int binopt_on = 1;
+    if (setsockopt(robot_socket, SOL_SOCKET, SO_REUSEADDR, &binopt_on, sizeof(int)) == -1)
+    {
+        close(robot_socket);
+        robot_socket = 0;
+        throw runtime_error(string("Failed to set socket options. setsockopt(): SO_REUSEADDR error: ") + to_string(errno));
+    }
+    
     // will not compile without that wierd looking type cast
     if (bind(robot_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)) == -1)
     {
@@ -240,13 +248,16 @@ RemoteCtlApp::~RemoteCtlApp()
     pthread_join(tx_thread, NULL);
 
     pthread_mutex_destroy(&write_lock);
+    shutdown(robot_socket, SHUT_RDWR);
     close(robot_socket);
 
     SDL_Quit();
 
     if (connection)
     {
+        shutdown(connection->first, SHUT_RDWR);
         close(connection->first);
+        
         delete connection;
     }
 }
@@ -344,10 +355,21 @@ int RemoteCtlApp::execute()
     // while the user has no closed the application
     while (running)
     {
-        // get all events
-        while (SDL_PollEvent(&event))
+        int success = SDL_WaitEvent(&event);
+        
+        if (success == 1)
         {
             _event(&event);
+        }
+        else
+        {
+            pthread_mutex_lock(&write_lock);
+            running = false;
+            pthread_mutex_unlock(&write_lock);
+            
+            printf("SDL input error: %s\n"
+                   "Critical error. Exiting...\n",
+                   SDL_GetError());
         }
     }
 

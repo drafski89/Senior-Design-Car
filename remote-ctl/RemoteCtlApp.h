@@ -57,6 +57,21 @@ struct GamepadState
     char button[32]; ///< button's number is its index into the array. Boolean: 0 or 1. 1 is pressed.
 };
 
+enum ButtonMap_t
+{
+    A_BTN = 0,
+    B_BTN,
+    X_BTN,
+    Y_BTN,
+    LB_BTN,
+    RB_BTN,
+    BACK_BTN,
+    START_BTN,
+    XBOX_BTN,
+    LS_BTN,
+    RS_BTN,
+};
+
 /**
  * This is a server for remote control of the Jetson car. It accepts connections
  * from the Jetson car over a TCP socket on port 5309 and sends a copy of the

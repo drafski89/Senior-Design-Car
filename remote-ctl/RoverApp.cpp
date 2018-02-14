@@ -60,6 +60,8 @@ void* ctl_loop(void* rover_ptr)
     struct timeval systime;
     gettimeofday(&systime, NULL);
     long start_time = systime.tv_sec * 1000000 + systime.tv_usec;
+    int update_div = 0; // clock divider to avoid flooding Arduino
+    int estop_expire = -1;
 
     while (running)
     {
@@ -67,41 +69,53 @@ void* ctl_loop(void* rover_ptr)
         struct GamepadState gamepad_state = rover->gamepad_state;
         running = rover->running;
         pthread_mutex_unlock(&rover->write_lock);
+        
+        // if E Stop button pressed
+        if (gamepad_state.button[B_BTN])
+        {
+            estop_expire = update_div + 100; // cut input for roughly 1 second
+        }
 
         steering_angle = 1500;
         drive_power = 1500;
 
-        if (abs(gamepad_state.axis_lx) > 0.2)
+        if (update_div > estop_expire)
         {
-            steering_angle = (short)(gamepad_state.axis_lx * 500.0 + 1500.0);
-        }
-
-        rover->pwm_gateway.send_mesg(1, (void*)&steering_angle, sizeof(short));
-
-        if (abs(gamepad_state.axis_ry) > 0.3)
-        {
-            double axis_pitch_adj = -gamepad_state.axis_ry;
-            if (axis_pitch_adj < 0)
+            if (abs(gamepad_state.axis_lx) > 0.2)
             {
-                axis_pitch_adj = (axis_pitch_adj + 0.3) / 0.7;
-            }
-            else
-            {
-                axis_pitch_adj = (axis_pitch_adj - 0.3) / 0.7;
+                steering_angle = (short)(gamepad_state.axis_lx * 500.0 + 1500.0);
             }
 
-            drive_power = (short)(axis_pitch_adj * 100.0 + 1500.0);
+            if (abs(gamepad_state.axis_ry) > 0.3)
+            {
+                double axis_pitch_adj = -gamepad_state.axis_ry;
+                if (axis_pitch_adj < 0)
+                {
+                    axis_pitch_adj = (axis_pitch_adj + 0.3) / 0.7;
+                }
+                else
+                {
+                    axis_pitch_adj = (axis_pitch_adj - 0.3) / 0.7;
+                }
+
+                drive_power = (short)(axis_pitch_adj * 100.0 + 1500.0);
+            }
         }
 
-        rover->pwm_gateway.send_mesg(0, (void*)&drive_power, sizeof(short));
+        if (update_div % 10 == 0)
+        {
+            rover->pwm_gateway.send_mesg(0, (void*)&drive_power, sizeof(short));
+            rover->pwm_gateway.send_mesg(1, (void*)&steering_angle, sizeof(short));
+        }
 
         gettimeofday(&systime, NULL);
         long current_time = systime.tv_sec * 1000000 + systime.tv_usec;
 
-        usleep(100 * 1000000 - (current_time - start_time));
+        usleep(10 * 1000 - (current_time - start_time));
 
         gettimeofday(&systime, NULL);
         start_time = systime.tv_sec * 1000000 + systime.tv_usec;
+        update_div++;
     }
 
     steering_angle = 1500;
@@ -161,6 +175,11 @@ RoverApp::~RoverApp()
     pthread_mutex_unlock(&write_lock);
 
     pthread_join(ctl_thread, NULL);
+    
+    // ensure the car stops!!!
+    short servo_neutral = 1500;
+    pwm_gateway.send_mesg(0, (void*)&servo_neutral, sizeof(short));
+    pwm_gateway.send_mesg(1, (void*)&servo_neutral, sizeof(short));
 
     pthread_mutex_destroy(&write_lock);
     close(cmd_socket);
@@ -192,6 +211,13 @@ void RoverApp::recieve_cmds()
                 printf("Connection error. recv() error %d\n", errno);
                 close(cmd_socket);
             }
+        }
+        else if (bytes_recieved == 0)
+        {
+            printf("Host at %s closed connection. Stopping...\n", inet_ntoa(cmd_host_addr.sin_addr));
+            shutdown(cmd_socket, SHUT_RDWR);
+            close(cmd_socket);
+            break;
         }
         else
         {
