@@ -1,3 +1,4 @@
+#include "ros/ros.h"
 #include "RemoteCtlApp.h"
 #include "RoverApp.h"
 #include <string>
@@ -24,6 +25,7 @@ int main(int argc, char* argv[])
 
     try
     {
+        ros::init(argc, argv, "base-ctl");
         rover = new RoverApp(host_addr);
     }
     catch (exception& exc)

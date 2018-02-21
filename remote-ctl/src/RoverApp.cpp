@@ -1,6 +1,8 @@
 #include "RoverApp.h"
 #include <exception>
 #include <stdexcept>
+#include "ros/ros.h"
+#include "std_msgs/String.h"
 
 using namespace std;
 
@@ -68,6 +70,8 @@ void* ctl_loop(void* rover_ptr)
         pthread_mutex_lock(&rover->write_lock);
         struct GamepadState gamepad_state = rover->gamepad_state;
         running = rover->running;
+        rover->steering_angle = steering_angle;
+        rover->drive_power = drive_power; // technically these will be one cycle behind but at 100hz this shouldn't be a problem
         pthread_mutex_unlock(&rover->write_lock);
         
         // if E Stop button pressed
@@ -127,6 +131,39 @@ void* ctl_loop(void* rover_ptr)
     return NULL;
 }
 
+void* ros_publish_loop(void* rover_ptr)
+{
+    RoverApp* rover = (RoverApp*)rover_ptr;
+    ros::NodeHandle rosnode;
+    ros::Publisher base_publisher = rosnode.advertise<std_msgs::String>("robot_base_state", 4);
+    
+    pthread_mutex_lock(&rover->write_lock);
+    bool running = rover->running;
+    pthread_mutex_unlock(&rover->write_lock);
+    
+    while (running && ros::ok())
+    {
+        pthread_mutex_lock(&rover->write_lock);
+        short steering_angle = rover->steering_angle;
+        short drive_power = rover->drive_power;
+        running = rover->running;
+        pthread_mutex_unlock(&rover->write_lock);
+        
+        string mesg_data(to_string(steering_angle));
+        mesg_data += ",";
+        mesg_data += to_string(drive_power);
+        
+        std_msgs::String mesg;
+        mesg.data = mesg_data;
+        
+        base_publisher.publish(mesg_data);
+        
+        usleep(100 * 1000000);
+    }
+    
+    return NULL;
+}
+
 RoverApp::RoverApp(const struct in_addr& host)
 {
     printf("Creating TCP socket for recieving commands...\n");
@@ -164,6 +201,19 @@ RoverApp::RoverApp(const struct in_addr& host)
     if (pthread_create(&ctl_thread, NULL, &ctl_loop, (void*)this) == -1)
     {
         close(cmd_socket);
+        throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
+    }
+    
+    if (pthread_create(&ros_publish_thread, NULL, &ros_publish_thread, (void*)this) == -1)
+    {
+        pthread_mutex_lock(&write_lock);
+        running = false;
+        pthread_mutex_unlock(&write_lock);
+        pthread_join(ctl_thread, NULL);
+     
+        close(cmd_socket);
+        pthread_mutex_destroy(&write_lock);
+        
         throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
     }
 }

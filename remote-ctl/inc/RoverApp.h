@@ -11,16 +11,20 @@
 class RoverApp
 {
     friend void* ctl_loop(void* rover_ptr);
+    friend void* ros_publish_loop(void* rover_ptr);
 
 private:
     bool running;
     ArduinoPWM pwm_gateway;
     struct GamepadState gamepad_state;
+    short steering_angle;
+    short drive_power;
 
     int cmd_socket;
     struct sockaddr_in cmd_host_addr;
 
     pthread_t ctl_thread;
+    pthread_t ros_publish_thread;
     pthread_mutex_t write_lock;
 
 public:
