@@ -2,6 +2,7 @@
 #include "RemoteCtlApp.h"
 #include "RoverApp.h"
 #include <string>
+#include <cstring>
 #include <iostream>
 #include "ArduinoPWM.h"
 #include <cstdlib>
@@ -15,13 +16,46 @@ int main(int argc, char* argv[])
     struct in_addr host_addr;
     RoverApp* rover = NULL;
 
-    do
+    if (argc > 1)
     {
-        printf("Enter IPv4 address of control host (e.g. \"192.168.1.1\") > ");
-        memset((void*)&host_addr, 0, sizeof(struct in_addr));
-        cin >> addr_str;
+        if (strcmp(argv[1], "--help") == 0)
+        {
+            printf("Usage:\n"
+                   "  base-ctl_node [ip_address] [ROS_opts] ...\n"
+                   "\n"
+                   "Description:\n"
+                   "  Runs the base control node. If an IPv4 address is given as the first argument,\n"
+                   "  the node will attempt to connect to a remote control host at that address. All\n"
+                   "  options after this are considered ROS launch options. If the first option is not\n"
+                   "  a valid IPv4 address, the program will immediately exit.\n"
+                   "\n"
+                   "  When no options are given, the user will be prompted for the address of the\n"
+                   "  control host.\n"
+                   "\n"
+                   "Options:\n"
+                   "  --help  - displays this help message and exits\n");
+             
+             return EXIT_SUCCESS;
+        }
+        if (!inet_aton(argv[1], &host_addr))
+        {
+            printf("%s is not a valid IP address. Exiting.\n", argv[1]);
+            return EXIT_FAILURE;
+        }
 
-    } while (!inet_aton(addr_str.c_str(), &host_addr));
+        argc++;
+        argv += sizeof(char**);
+    }
+    else
+    {
+        do
+        {
+            printf("Enter IPv4 address of control host (e.g. \"192.168.1.1\") > ");
+            memset((void*)&host_addr, 0, sizeof(struct in_addr));
+            cin >> addr_str;
+
+        } while (!inet_aton(addr_str.c_str(), &host_addr));
+    }
 
     try
     {
