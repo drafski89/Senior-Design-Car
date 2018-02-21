@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
 
     try
     {
-        ros::init(argc, argv, "base-ctl");
+        ros::init(argc, argv, "base_ctl");
         rover = new RoverApp(host_addr);
     }
     catch (exception& exc)

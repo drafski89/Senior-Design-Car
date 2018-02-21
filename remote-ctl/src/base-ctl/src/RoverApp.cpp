@@ -156,9 +156,9 @@ void* ros_publish_loop(void* rover_ptr)
         std_msgs::String mesg;
         mesg.data = mesg_data;
         
-        base_publisher.publish(mesg_data);
+        base_publisher.publish(mesg);
         
-        usleep(100 * 1000000);
+        usleep(100 * 1000);
     }
     
     return NULL;
@@ -204,7 +204,7 @@ RoverApp::RoverApp(const struct in_addr& host)
         throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
     }
     
-    if (pthread_create(&ros_publish_thread, NULL, &ros_publish_thread, (void*)this) == -1)
+    if (pthread_create(&ros_publish_thread, NULL, &ros_publish_loop, (void*)this) == -1)
     {
         pthread_mutex_lock(&write_lock);
         running = false;
@@ -225,6 +225,7 @@ RoverApp::~RoverApp()
     pthread_mutex_unlock(&write_lock);
 
     pthread_join(ctl_thread, NULL);
+    pthread_join(ros_publish_thread, NULL);
     
     // ensure the car stops!!!
     short servo_neutral = 1500;
