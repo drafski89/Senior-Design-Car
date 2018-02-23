@@ -96,8 +96,12 @@ void* tx_handler(void* app_ptr)
 
         gettimeofday(&systime, NULL);
         long current_time = systime.tv_sec * 1000000 + systime.tv_usec;
+        long sleep_time = 10 * 1000 - (current_time - start_time);
 
-        usleep(10 * 1000 - (current_time - start_time)); // send at 100 Hz
+        if (sleep_time > 0) // usleep takes an unsigned long. negative values will cause sleeping for thousands of years
+        {
+            usleep(sleep_time); // send at 100 Hz
+        }
 
         gettimeofday(&systime, NULL);
         start_time = systime.tv_sec * 1000000 + systime.tv_usec;
@@ -177,7 +181,7 @@ RemoteCtlApp::RemoteCtlApp()
         robot_socket = 0;
         throw runtime_error(string("Failed to set socket options. setsockopt(): SO_REUSEADDR error: ") + to_string(errno));
     }
-    
+
     // will not compile without that wierd looking type cast
     if (bind(robot_socket, (struct sockaddr*)&socket_addr, sizeof(struct sockaddr_in)) == -1)
     {
@@ -257,7 +261,7 @@ RemoteCtlApp::~RemoteCtlApp()
     {
         shutdown(connection->first, SHUT_RDWR);
         close(connection->first);
-        
+
         delete connection;
     }
 }
@@ -356,7 +360,7 @@ int RemoteCtlApp::execute()
     while (running)
     {
         int success = SDL_WaitEvent(&event);
-        
+
         if (success == 1)
         {
             _event(&event);
@@ -366,7 +370,7 @@ int RemoteCtlApp::execute()
             pthread_mutex_lock(&write_lock);
             running = false;
             pthread_mutex_unlock(&write_lock);
-            
+
             printf("SDL input error: %s\n"
                    "Critical error. Exiting...\n",
                    SDL_GetError());
