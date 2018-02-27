@@ -26,6 +26,8 @@ private:
     pthread_t ctl_thread;
     pthread_t ros_publish_thread;
     pthread_mutex_t write_lock;
+    pthread_rwlock_t rc_semaphore;
+    pthread_rwlock_t base_state_semaphore;
 
 public:
     RoverApp(const struct in_addr& host);

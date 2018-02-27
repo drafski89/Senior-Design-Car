@@ -364,6 +364,7 @@ int RemoteCtlApp::execute()
         if (success == 1)
         {
             _event(&event);
+            fflush(stdout);
         }
         else
         {

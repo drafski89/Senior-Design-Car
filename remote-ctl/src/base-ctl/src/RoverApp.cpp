@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include "ros/ros.h"
 #include "std_msgs/String.h"
+#include <stropts.h>
+#include <poll.h>
 
 using namespace std;
 
@@ -52,9 +54,9 @@ void* ctl_loop(void* rover_ptr)
 {
     RoverApp* rover = (RoverApp*)rover_ptr;
 
-    pthread_mutex_lock(&rover->write_lock);
+    pthread_rwlock_rdlock(&rover->rc_semaphore);
     bool running = rover->running;
-    pthread_mutex_unlock(&rover->write_lock);
+    pthread_rwlock_unlock(&rover->rc_semaphore);
 
     short steering_angle = 1500;
     short drive_power = 1500;
@@ -67,13 +69,11 @@ void* ctl_loop(void* rover_ptr)
 
     while (running)
     {
-        pthread_mutex_lock(&rover->write_lock);
+        pthread_rwlock_rdlock(&rover->rc_semaphore);
         struct GamepadState gamepad_state = rover->gamepad_state;
         running = rover->running;
-        rover->steering_angle = steering_angle;
-        rover->drive_power = drive_power; // technically these will be one cycle behind but at 100hz this shouldn't be a problem
-        pthread_mutex_unlock(&rover->write_lock);
-        
+        pthread_rwlock_unlock(&rover->rc_semaphore);
+
         // if E Stop button pressed
         if (gamepad_state.button[B_BTN])
         {
@@ -112,10 +112,18 @@ void* ctl_loop(void* rover_ptr)
             rover->pwm_gateway.send_mesg(1, (void*)&steering_angle, sizeof(short));
         }
 
-        gettimeofday(&systime, NULL);
-        long current_time = systime.tv_sec * 1000000 + systime.tv_usec;
+        pthread_rwlock_wrlock(&rover->base_state_semaphore);
+        rover->steering_angle = steering_angle;
+        rover->drive_power = drive_power;
+        pthread_rwlock_unlock(&rover->base_state_semaphore);
 
-        usleep(10 * 1000 - (current_time - start_time));
+        gettimeofday(&systime, NULL);
+        long sleep_time = 10 * 1000 - (systime.tv_sec * 1000000 + systime.tv_usec - start_time);
+
+        if (sleep_time > 0)
+        {
+            usleep(sleep_time);
+        }
 
         gettimeofday(&systime, NULL);
         start_time = systime.tv_sec * 1000000 + systime.tv_usec;
@@ -136,31 +144,34 @@ void* ros_publish_loop(void* rover_ptr)
     RoverApp* rover = (RoverApp*)rover_ptr;
     ros::NodeHandle rosnode;
     ros::Publisher base_publisher = rosnode.advertise<std_msgs::String>("robot_base_state", 4);
-    
-    pthread_mutex_lock(&rover->write_lock);
+
+    pthread_rwlock_rdlock(&rover->rc_semaphore);
     bool running = rover->running;
-    pthread_mutex_unlock(&rover->write_lock);
-    
+    pthread_rwlock_unlock(&rover->rc_semaphore);
+
     while (running && ros::ok())
     {
-        pthread_mutex_lock(&rover->write_lock);
+        pthread_rwlock_rdlock(&rover->base_state_semaphore);
         short steering_angle = rover->steering_angle;
         short drive_power = rover->drive_power;
-        running = rover->running;
-        pthread_mutex_unlock(&rover->write_lock);
-        
+        pthread_rwlock_unlock(&rover->base_state_semaphore);
+
         string mesg_data(to_string(steering_angle));
         mesg_data += ",";
         mesg_data += to_string(drive_power);
-        
+
         std_msgs::String mesg;
         mesg.data = mesg_data;
-        
+
         base_publisher.publish(mesg);
-        
+
         usleep(100 * 1000);
+
+        pthread_rwlock_rdlock(&rover->rc_semaphore);
+        running = rover->running;
+        pthread_rwlock_unlock(&rover->rc_semaphore);
     }
-    
+
     return NULL;
 }
 
@@ -190,10 +201,11 @@ RoverApp::RoverApp(const struct in_addr& host)
     printf("Success! Now listening for commands...\n");
     memset((void*)&gamepad_state, 0, sizeof(struct GamepadState));
 
-    if (pthread_mutex_init(&write_lock, NULL) == -1)
+    if (pthread_rwlock_init(&rc_semaphore, NULL) ||
+        pthread_rwlock_init(&base_state_semaphore, NULL))
     {
         close(cmd_socket);
-        throw runtime_error(string("Failed to create mutex. pthread_mutex_create() error ") + to_string(errno));
+        throw runtime_error("Failed to create guarding semaphores");
     }
 
     running = true;
@@ -203,45 +215,50 @@ RoverApp::RoverApp(const struct in_addr& host)
         close(cmd_socket);
         throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
     }
-    
+
     if (pthread_create(&ros_publish_thread, NULL, &ros_publish_loop, (void*)this) == -1)
     {
-        pthread_mutex_lock(&write_lock);
+        pthread_rwlock_wrlock(&rc_semaphore);
         running = false;
-        pthread_mutex_unlock(&write_lock);
+        pthread_rwlock_unlock(&rc_semaphore);
         pthread_join(ctl_thread, NULL);
-     
+
         close(cmd_socket);
-        pthread_mutex_destroy(&write_lock);
-        
+        pthread_rwlock_destroy(&rc_semaphore);
+        pthread_rwlock_destroy(&base_state_semaphore);
+
         throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
     }
 }
 
 RoverApp::~RoverApp()
 {
-    pthread_mutex_lock(&write_lock);
+    pthread_rwlock_wrlock(&rc_semaphore);
     running = false;
-    pthread_mutex_unlock(&write_lock);
+    pthread_rwlock_unlock(&rc_semaphore);
 
     pthread_join(ctl_thread, NULL);
     pthread_join(ros_publish_thread, NULL);
-    
+
     // ensure the car stops!!!
     short servo_neutral = 1500;
     pwm_gateway.send_mesg(0, (void*)&servo_neutral, sizeof(short));
     pwm_gateway.send_mesg(1, (void*)&servo_neutral, sizeof(short));
 
-    pthread_mutex_destroy(&write_lock);
+    pthread_rwlock_destroy(&rc_semaphore);
+    pthread_rwlock_destroy(&base_state_semaphore);
     close(cmd_socket);
 }
 
 void RoverApp::recieve_cmds()
 {
+    struct pollfd recv_timeout;
+    recv_timeout.fd = cmd_socket;
+    recv_timeout.events = POLLIN
     char mesg[DEFAULT_MESG_SIZE];
-    int bytes_recieved = 0;
+    int bytes_recieved = 1;
 
-    while (bytes_recieved > -1)
+    while (bytes_recieved > 0 && ros::ok())
     {
         memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
         bytes_recieved = recv(cmd_socket, (void*)mesg, DEFAULT_MESG_SIZE, 0);
@@ -254,27 +271,30 @@ void RoverApp::recieve_cmds()
             }
             else if (errno == ECONNREFUSED)
             {
-                printf("Lost connection to host. Stopping...\n");
+                printf("\nLost connection to host. Stopping...\n");
                 close(cmd_socket);
             }
             else
             {
-                printf("Connection error. recv() error %d\n", errno);
+                printf("\nConnection error. recv() error %d\n", errno);
                 close(cmd_socket);
             }
         }
         else if (bytes_recieved == 0)
         {
-            printf("Host at %s closed connection. Stopping...\n", inet_ntoa(cmd_host_addr.sin_addr));
+            printf("\nHost at %s closed connection. Stopping...\n", inet_ntoa(cmd_host_addr.sin_addr));
             shutdown(cmd_socket, SHUT_RDWR);
             close(cmd_socket);
-            break;
+        }
+        else if (bytes_recieved != DEFAULT_MESG_SIZE)
+        {
+            continue; // bad packet. skip
         }
         else
         {
-            pthread_mutex_lock(&write_lock);
+            pthread_rwlock_wrlock(&rc_semaphore);
             memcpy((void*)&gamepad_state, (void*)mesg, sizeof(struct GamepadState));
-            pthread_mutex_unlock(&write_lock);
+            pthread_rwlock_unlock(&rc_semaphore);
 
             char button[33];
             memset((void*)button, 0, 33);
@@ -289,5 +309,10 @@ void RoverApp::recieve_cmds()
                    gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
                    button);
         }
+    }
+
+    if (!ros::ok())
+    {
+        printf("\nROS core encountered problem. Unsafe to continue. Stopping\n");
     }
 }
