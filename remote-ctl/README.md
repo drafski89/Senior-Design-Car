@@ -7,19 +7,12 @@ Currently capable of steering the car but not driving it.
 
 *Build the base station executable:*
 
+    $ cd src/base-ctl/
     $ ./build-base-station.sh
 
-*Build the Jetson reciever application:*
+*Build the ROS node for base control:*
 
-_NOTE: You will need to build the GPIO API before this. If you already did, skip ahead._
-
-    $ cd ../gpio-lib
-    $ ./build-gpiolib.sh
-    $ cd ../remote-ctl
-
----
-
-    $ ./build-rover.sh
+    $ catkin_make
 
 ## Dependencies
 
@@ -27,17 +20,48 @@ You will need
 
 - SDL2:
   https://libsdl.org
-  
-    $ sudo apt-get install sdl2
 
-# To Run:
+    $ sudo apt-get install libsdl2_2.0-0
+    $ sudo apt-get install libsdl2-dev
 
-On the host machine with Xbox controller attached, run the 'base-station' executable.
+# To Install / Run:
 
-    $ ./base-station
+## Raspberry Pi Controller
 
-This will start a server for transmitting the gamepad state to the car.
-After starting the base station, run the 'rover' executable on the Jetson.
+The Raspberry Pi in the lab is set up to run the 'base-station' server
+automatically at boot time for controlling the car via Xbox controller over Wifi.
+If the server has been updated, you will need to reinstall it.
 
-    $ sudo ./rover   // you need root privelege for using the GPIO
+    $ ssh pi@192.168.1.6          # ssh into Raspberry Pi. password \'seniordesign2018\'
+    $ cd git/Senior-Design-Car/
+    $ git pull                    # update repository
 
+Then follow build instructions above. Once built:
+
+    $ cp base-station /usr/bin/
+    $ cd ../../
+    $ cp base-station.service $(pkg-config systemd --variable=systemdsystemconfdir)
+    $ sudo systemctl restart base-station
+
+Note that you will need to have the Xbox controller attached to the Pi at all
+times, else the server will fail to start. If it does fail to start, then it can
+be started using:
+
+    $ sudo systemctl start base-station
+
+While ssh'd into the Pi.
+
+## To start the ROS node for controlling the car:
+
+!! THE CAR WILL NOT MOVE AT ALL IF YOU DO NOT RUN THIS ROS NODE !!
+
+Either from the Jetson desktop or while ssh'd into it, run:
+
+    $ devel/lib/base-ctl/base-ctl_node 192.168.1.6
+
+While in this folder. Note that this process currently cannot be terminated via
+Ctl+C so you will need to run:
+
+    $ kill -s SIGTERM $(pgrep base-ctl_node)
+
+From another console in order to stop it.

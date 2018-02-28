@@ -22,12 +22,15 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    cv::medianBlur(img_color, img_color, 15);
+
     cv::Mat img_gray;
     cv::cvtColor(img_color, img_gray, cv::COLOR_BGR2GRAY);
 
     cv::Mat edge_img;
     cv::Canny(img_gray, edge_img, 40.0, 80.0);
 
+    cv::imwrite(string("blur_img.jpg"), img_color);
     cv::imwrite(string("edge_img.jpg"), edge_img);
 
     return EXIT_SUCCESS;
