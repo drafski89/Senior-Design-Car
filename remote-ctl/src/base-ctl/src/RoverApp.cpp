@@ -1,12 +1,13 @@
 #include "RoverApp.h"
 #include <exception>
 #include <stdexcept>
-#include "ros/ros.h"
-#include "std_msgs/String.h"
 #include <stropts.h>
 #include <poll.h>
 
 using namespace std;
+
+double steering_input;
+double throttle_input;
 
 const char* err_mesgs[] = {
     "No route to requested IP address",
@@ -50,6 +51,12 @@ const char* connect_err_mesg(int code)
     return err_mesg;
 }
 
+void base_control_listener(const std_msgs::ColorRGBA& throttle_steer)
+{
+    throttle_input = (double)throttle_steer.r;
+    steering_input = (double)throttle_steer.g;
+}
+
 void* ctl_loop(void* rover_ptr)
 {
     RoverApp* rover = (RoverApp*)rover_ptr;
@@ -78,6 +85,13 @@ void* ctl_loop(void* rover_ptr)
         if (gamepad_state.button[B_BTN])
         {
             estop_expire = update_div + 100; // cut input for roughly 1 second
+            rover->autonomous = false;
+        }
+        
+        // if user wanted car to go into autonomous mode
+        if (gamepad_state.button[START_BTN] && gamepad_state.button[BACK_BTN] && !rover->autonomous)
+        {
+            rover->autonomous = true;
         }
 
         steering_angle = 1500;
@@ -85,25 +99,36 @@ void* ctl_loop(void* rover_ptr)
 
         if (update_div > estop_expire)
         {
+            double throttle_val = 0.0;
+            double steering_val = 0.0;
+            
             if (abs(gamepad_state.axis_lx) > 0.2)
             {
-                steering_angle = (short)(gamepad_state.axis_lx * 500.0 + 1500.0);
+                steering_val = gamepad_state.axis_lx;
             }
-
+            
             if (abs(gamepad_state.axis_ry) > 0.3)
             {
-                double axis_pitch_adj = -gamepad_state.axis_ry;
-                if (axis_pitch_adj < 0)
+                throttle_val = -gamepad_state.axis_ry;
+                
+                if (throttle_val < 0)
                 {
-                    axis_pitch_adj = (axis_pitch_adj + 0.3) / 0.7;
+                    throttle_val = (throttle_val + 0.3) / 0.7;
                 }
                 else
                 {
-                    axis_pitch_adj = (axis_pitch_adj - 0.3) / 0.7;
+                    throttle_val = (throttle_val - 0.3) / 0.7;
                 }
-
-                drive_power = (short)(axis_pitch_adj * 100.0 + 1500.0);
             }
+            
+            if (rover->autonomous)
+            {
+                throttle_val = throttle_input;
+                steering_val = steering_input;
+            }
+            
+            steering_angle = (short)(steering_val * 500.0 + 1500.0);
+            drive_power = (short)(throttle_val * 100.0 + 1500.0);
         }
 
         if (update_div % 10 == 0)
@@ -142,9 +167,8 @@ void* ctl_loop(void* rover_ptr)
 void* ros_publish_loop(void* rover_ptr)
 {
     RoverApp* rover = (RoverApp*)rover_ptr;
-    ros::NodeHandle rosnode;
-    ros::Publisher base_publisher = rosnode.advertise<std_msgs::String>("robot_base_state", 4);
-
+    ros::Publisher base_publisher = rover->rosnode.advertise<std_msgs::String>("robot_base_state", 4);
+    
     pthread_rwlock_rdlock(&rover->rc_semaphore);
     bool running = rover->running;
     pthread_rwlock_unlock(&rover->rc_semaphore);
@@ -175,7 +199,29 @@ void* ros_publish_loop(void* rover_ptr)
     return NULL;
 }
 
-RoverApp::RoverApp(const struct in_addr& host)
+void* ros_listen_loop(void* rover_ptr)
+{
+    RoverApp* rover = (RoverApp*)rover_ptr;
+    
+    pthread_rwlock_rdlock(&rover->rc_semaphore);
+    bool running = rover->running;
+    pthread_rwlock_unlock(&rover->rc_semaphore);
+    
+    while (running)
+    {
+        ros::spinOnce();
+        
+        usleep(1000);
+        
+        pthread_rwlock_rdlock(&rover->rc_semaphore);
+        running = rover->running;
+        pthread_rwlock_unlock(&rover->rc_semaphore);
+    }
+
+    return NULL;
+}
+
+RoverApp::RoverApp(const struct in_addr& host) : rosnode(ros::NodeHandle())
 {
     printf("Creating TCP socket for recieving commands...\n");
     cmd_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -227,7 +273,24 @@ RoverApp::RoverApp(const struct in_addr& host)
         pthread_rwlock_destroy(&rc_semaphore);
         pthread_rwlock_destroy(&base_state_semaphore);
 
-        throw runtime_error(string("Failed to create control thread. pthread_create() error ") + to_string(errno));
+        throw runtime_error(string("Failed to create ROS publisher thread. pthread_create() error ") + to_string(errno));
+    }
+    
+    ctl_listener = rosnode.subscribe("robot_base_control", 5, base_control_listener);
+    
+    if (pthread_create(&ros_listen_thread, NULL, &ros_listen_loop, (void*)this) == -1)
+    {
+        pthread_rwlock_wrlock(&rc_semaphore);
+        running = false;
+        pthread_rwlock_unlock(&rc_semaphore);
+        pthread_join(ctl_thread, NULL);
+        pthread_join(ros_publish_thread, NULL);
+
+        close(cmd_socket);
+        pthread_rwlock_destroy(&rc_semaphore);
+        pthread_rwlock_destroy(&base_state_semaphore);
+
+        throw runtime_error(string("Failed to create ROS listener thread. pthread_create() error ") + to_string(errno));
     }
 }
 
@@ -239,6 +302,7 @@ RoverApp::~RoverApp()
 
     pthread_join(ctl_thread, NULL);
     pthread_join(ros_publish_thread, NULL);
+    pthread_join(ros_listen_thread, NULL);
 
     // ensure the car stops!!!
     short servo_neutral = 1500;
