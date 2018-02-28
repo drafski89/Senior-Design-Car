@@ -87,7 +87,7 @@ void* ctl_loop(void* rover_ptr)
             estop_expire = update_div + 100; // cut input for roughly 1 second
             rover->autonomous = false;
         }
-        
+
         // if user wanted car to go into autonomous mode
         if (gamepad_state.button[START_BTN] && gamepad_state.button[BACK_BTN] && !rover->autonomous)
         {
@@ -101,16 +101,16 @@ void* ctl_loop(void* rover_ptr)
         {
             double throttle_val = 0.0;
             double steering_val = 0.0;
-            
+
             if (abs(gamepad_state.axis_lx) > 0.2)
             {
                 steering_val = gamepad_state.axis_lx;
             }
-            
+
             if (abs(gamepad_state.axis_ry) > 0.3)
             {
                 throttle_val = -gamepad_state.axis_ry;
-                
+
                 if (throttle_val < 0)
                 {
                     throttle_val = (throttle_val + 0.3) / 0.7;
@@ -120,13 +120,13 @@ void* ctl_loop(void* rover_ptr)
                     throttle_val = (throttle_val - 0.3) / 0.7;
                 }
             }
-            
+
             if (rover->autonomous)
             {
                 throttle_val = throttle_input;
                 steering_val = steering_input;
             }
-            
+
             steering_angle = (short)(steering_val * 500.0 + 1500.0);
             drive_power = (short)(throttle_val * 100.0 + 1500.0);
         }
@@ -168,7 +168,7 @@ void* ros_publish_loop(void* rover_ptr)
 {
     RoverApp* rover = (RoverApp*)rover_ptr;
     ros::Publisher base_publisher = rover->rosnode.advertise<std_msgs::String>("robot_base_state", 4);
-    
+
     pthread_rwlock_rdlock(&rover->rc_semaphore);
     bool running = rover->running;
     pthread_rwlock_unlock(&rover->rc_semaphore);
@@ -202,17 +202,17 @@ void* ros_publish_loop(void* rover_ptr)
 void* ros_listen_loop(void* rover_ptr)
 {
     RoverApp* rover = (RoverApp*)rover_ptr;
-    
+
     pthread_rwlock_rdlock(&rover->rc_semaphore);
     bool running = rover->running;
     pthread_rwlock_unlock(&rover->rc_semaphore);
-    
+
     while (running)
     {
         ros::spinOnce();
-        
+
         usleep(1000);
-        
+
         pthread_rwlock_rdlock(&rover->rc_semaphore);
         running = rover->running;
         pthread_rwlock_unlock(&rover->rc_semaphore);
@@ -275,9 +275,9 @@ RoverApp::RoverApp(const struct in_addr& host) : rosnode(ros::NodeHandle())
 
         throw runtime_error(string("Failed to create ROS publisher thread. pthread_create() error ") + to_string(errno));
     }
-    
+
     ctl_listener = rosnode.subscribe("robot_base_control", 5, base_control_listener);
-    
+
     if (pthread_create(&ros_listen_thread, NULL, &ros_listen_loop, (void*)this) == -1)
     {
         pthread_rwlock_wrlock(&rc_semaphore);
@@ -314,6 +314,19 @@ RoverApp::~RoverApp()
     close(cmd_socket);
 }
 
+bool verify_mesg(const char* buf, int size)
+{
+    char checksum = 0;
+    size++; // include checksum byte
+
+    for (int index = 0; index < size; index++)
+    {
+        checksum += buf[index];
+    }
+
+    return checksum == '\0';
+}
+
 void RoverApp::recieve_cmds()
 {
     struct pollfd recv_timeout;
@@ -329,54 +342,59 @@ void RoverApp::recieve_cmds()
         int poll_status = poll(&recv_timeout, 1, timeout_ms);
         if (poll_status > 0)
         {
-        bytes_recieved = recv(cmd_socket, (void*)mesg, DEFAULT_MESG_SIZE, 0);
+            bytes_recieved = recv(cmd_socket, (void*)mesg, DEFAULT_MESG_SIZE, 0);
 
-        if (bytes_recieved == -1)
-        {
-            if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+            if (bytes_recieved == -1)
             {
-                continue;
+                if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+                {
+                    continue;
+                }
+                else if (errno == ECONNREFUSED)
+                {
+                    printf("\nLost connection to host. Stopping...\n");
+                    close(cmd_socket);
+                }
+                else
+                {
+                    printf("\nConnection error. recv() error %d\n", errno);
+                    close(cmd_socket);
+                }
             }
-            else if (errno == ECONNREFUSED)
+            else if (bytes_recieved == 0)
             {
-                printf("\nLost connection to host. Stopping...\n");
+                printf("\nHost at %s closed connection. Stopping...\n", inet_ntoa(cmd_host_addr.sin_addr));
+                shutdown(cmd_socket, SHUT_RDWR);
                 close(cmd_socket);
+            }
+            else if (bytes_recieved != DEFAULT_MESG_SIZE)
+            {
+                continue; // bad packet. skip
             }
             else
             {
-                printf("\nConnection error. recv() error %d\n", errno);
-                close(cmd_socket);
+                if (!verify_mesg(mesg, sizeof(struct GamepadState)))
+                {
+                    continue; // bad packet. skip
+                }
+
+                pthread_rwlock_wrlock(&rc_semaphore);
+                memcpy((void*)&gamepad_state, (void*)mesg, sizeof(struct GamepadState));
+                pthread_rwlock_unlock(&rc_semaphore);
+
+                char button[33];
+                memset((void*)button, 0, 33);
+
+                for (int index = 0; index < 32; index++)
+                {
+                    button[index] = gamepad_state.button[index] + 0x30;
+                }
+
+                printf("LX: % 6.04f    LY: % 6.04f    LT: % 6.04f    RX: % 6.04f    RY: % 6.04f    RT: % 6.04f    %s\r",
+                       gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
+                       gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
+                       button);
             }
-        }
-        else if (bytes_recieved == 0)
-        {
-            printf("\nHost at %s closed connection. Stopping...\n", inet_ntoa(cmd_host_addr.sin_addr));
-            shutdown(cmd_socket, SHUT_RDWR);
-            close(cmd_socket);
-        }
-        else if (bytes_recieved != DEFAULT_MESG_SIZE)
-        {
-            continue; // bad packet. skip
-        }
-        else
-        {
-            pthread_rwlock_wrlock(&rc_semaphore);
-            memcpy((void*)&gamepad_state, (void*)mesg, sizeof(struct GamepadState));
-            pthread_rwlock_unlock(&rc_semaphore);
-
-            char button[33];
-            memset((void*)button, 0, 33);
-
-            for (int index = 0; index < 32; index++)
-            {
-                button[index] = gamepad_state.button[index] + 0x30;
-            }
-
-            printf("LX: % 6.04f    LY: % 6.04f    LT: % 6.04f    RX: % 6.04f    RY: % 6.04f    RT: % 6.04f    %s\r",
-                   gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
-                   gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
-                   button);
-        }
         }
         else
         {

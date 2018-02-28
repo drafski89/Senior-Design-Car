@@ -47,6 +47,18 @@ void* connect_handler(void* app_ptr)
     return NULL;
 }
 
+char gen_checksum(const char* buf, int size)
+{
+    char checksum = 0;
+
+    for (int index = 0; index < size; index++)
+    {
+        checksum += buf[index];
+    }
+
+    return -checksum;
+}
+
 void* tx_handler(void* app_ptr)
 {
     RemoteCtlApp* app = (RemoteCtlApp*)app_ptr;
@@ -65,7 +77,11 @@ void* tx_handler(void* app_ptr)
             memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
 
             pthread_mutex_lock(&app->write_lock);
+
             memcpy((void*)mesg, (void*)&app->gamepad_state, sizeof(struct GamepadState));
+            mesg[sizeof(struct GamepadState)] = gen_checksum((char*)&app->gamepad_state,
+                                                              sizeof(struct GamepadState));
+
             pthread_mutex_unlock(&app->write_lock);
 
             int bytes_sent = send(app->connection->first, (void*)mesg, DEFAULT_MESG_SIZE, MSG_NOSIGNAL);
