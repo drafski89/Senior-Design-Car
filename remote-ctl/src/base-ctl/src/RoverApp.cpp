@@ -254,13 +254,17 @@ void RoverApp::recieve_cmds()
 {
     struct pollfd recv_timeout;
     recv_timeout.fd = cmd_socket;
-    recv_timeout.events = POLLIN
+    recv_timeout.events = POLLIN | POLLPRI;
+    int timeout_ms = 1500;
     char mesg[DEFAULT_MESG_SIZE];
     int bytes_recieved = 1;
 
     while (bytes_recieved > 0 && ros::ok())
     {
         memset((void*)mesg, 0, DEFAULT_MESG_SIZE);
+        int poll_status = poll(&recv_timeout, 1, timeout_ms);
+        if (poll_status > 0)
+        {
         bytes_recieved = recv(cmd_socket, (void*)mesg, DEFAULT_MESG_SIZE, 0);
 
         if (bytes_recieved == -1)
@@ -308,6 +312,12 @@ void RoverApp::recieve_cmds()
                    gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
                    gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
                    button);
+        }
+        }
+        else
+        {
+            printf("\nRecieving gamepad state timed out. Stopping\n");
+            bytes_recieved = -1; // force exit
         }
     }
 
