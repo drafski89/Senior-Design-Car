@@ -29,7 +29,7 @@ int main(int argc, char* argv[])
     cv::resize(img_color, img_color, cv::Size(hres, vres), cv::INTER_AREA);
 
     // remove noise
-    cv::medianBlur(img_color, img_color, 21);
+    cv::medianBlur(img_color, img_color, 15);
     //cv::GaussianBlur(img_color, img_color, cv::Size(25, 25), 15, 1);
 
     // convert image to grayscale
@@ -53,6 +53,8 @@ int main(int argc, char* argv[])
     cv::HoughLines(edge_img, lines, 10.0, 4.0 * CV_PI / 180.0, 400);
 
     printf("Found %lu lines in the image\n", lines.size());
+    vector<cv::Vec2d> lane_lines_left;
+    vector<cv::Vec2d> lane_lines_right;
 
     for (auto& line : lines)
     {
@@ -73,11 +75,13 @@ int main(int argc, char* argv[])
             {
                 x2 = -y_init / slope + x_init;
                 y2 = 0.0;
+                lane_lines_left.push_back(cv::Vec2d(slope, -slope * x_init + y_init));
             }
             else
             {
                 x2 = (double)edge_img.cols;
                 y2 = slope * x2 - slope * x_init + y_init;
+                lane_lines_right.push_back(cv::Vec2d(slope, -slope * x_init + y_init));
             }
 
             cv::line(edge_img,
@@ -88,6 +92,41 @@ int main(int argc, char* argv[])
 
             printf("(%f, %f), (%f, %f)\n", x1, y1, x2, y2);
         }
+    }
+
+
+    if (!lane_lines_left.empty() && !lane_lines_right.empty())
+    {
+        cv::Vec2d lane_left(lane_lines_left[0][0], lane_lines_left[0][1]);
+        cv::Vec2d lane_right(lane_lines_right[0][0], lane_lines_right[0][1]);
+
+        for (int index = 1; index < lane_lines_left.size(); index++)
+        {
+            lane_left[0] = (lane_left[0] + lane_lines_left[index][0]) / 2.0;
+            lane_left[1] = (lane_left[1] + lane_lines_left[index][1]) / 2.0;
+        }
+
+        for (int index = 1; index < lane_lines_right.size(); index++)
+        {
+            lane_right[0] = (lane_right[0] + lane_lines_right[index][0]) / 2.0;
+            lane_right[1] = (lane_right[1] + lane_lines_right[index][1]) / 2.0;
+        }
+
+        int lane_start_y = edge_img.rows;
+        int lane_left_start_x = ((double)lane_start_y - lane_left[1]) / lane_left[0];
+        int lane_right_start_x = ((double)lane_start_y - lane_right[1]) / lane_right[0];
+        int lane_center = lane_left_start_x + ((double)lane_right_start_x - lane_left_start_x) / 2.0;
+        int xint = (lane_right[1] - lane_left[1]) / (lane_left[0] - lane_right[0]);
+        int yint = lane_right[0] * xint + lane_right[0];
+
+        cv::line(edge_img,
+                 cv::Point2i(xint, yint),
+                 cv::Point2i(lane_center, lane_start_y),
+                 cv::Scalar(255.0),
+                 5);
+
+        printf("\nDistance from Center: %d px\n"
+               "Right / Left X: %d, %d\n", edge_img.cols / 2 - lane_center, lane_right_start_x, lane_left_start_x);
     }
 
     // write out images for analysis
