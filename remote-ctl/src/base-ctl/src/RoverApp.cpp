@@ -74,9 +74,9 @@ void* ctl_loop(void* rover_ptr)
     int update_div = 0; // clock divider to avoid flooding Arduino
     int estop_expire = -1;
 
-	bool speed_limit_up = false;
-	bool speed_limit_down = false;
-	double throttle_max = 100;
+    bool speed_limit_up = false;
+    bool speed_limit_down = false;
+    double throttle_max = 100;
 
     while (running)
     {
@@ -85,27 +85,27 @@ void* ctl_loop(void* rover_ptr)
         running = rover->running;
         pthread_rwlock_unlock(&rover->rc_semaphore);
 
-		// if throttle limit up button bumped
-		if (gamepad_state.button[RB_BTN])
-		{
-			speed_limit_up = true;
-		}
-		else if (speed_limit_up)
-		{
-			speed_limit_up = false;
-			if (throttle_max < 500.0) { throttle_max += 50 }
-		}
-		
-		// if throttle limit down button bumped
-		if (gamepad_state.button[LB_BTN])
-		{
-			speed_limit_down = true;
-		}
-		else if (speed_limit_up)
-		{
-			speed_limit_down = false;
-			if (throttle_max > 0.0) { throttle_max -= 50 }
-		}
+        // if throttle limit up button bumped
+        if (gamepad_state.button[RB_BTN])
+        {
+            speed_limit_up = true;
+        }
+        else if (speed_limit_up)
+        {
+            speed_limit_up = false;
+            if (throttle_max < 500.0) { throttle_max += 50 }
+        }
+
+        // if throttle limit down button bumped
+        if (gamepad_state.button[LB_BTN])
+        {
+            speed_limit_down = true;
+        }
+        else if (speed_limit_up)
+        {
+            speed_limit_down = false;
+            if (throttle_max > 0.0) { throttle_max -= 50 }
+        }
 
         // if E Stop button pressed
         if (gamepad_state.button[B_BTN])
