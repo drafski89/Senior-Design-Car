@@ -3,6 +3,7 @@
 #include <cmath>
 #include <vector>
 #include <string>
+#include <sys/time.h>
 #include "opencv2/opencv.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
@@ -27,6 +28,10 @@ int main(int argc, char* argv[])
     int hres = 1920;
     int vres = (int)((double)img_color.rows * ((double)hres / img_color.cols));
     cv::resize(img_color, img_color, cv::Size(hres, vres), cv::INTER_AREA);
+
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    unsigned long start_time = now.tv_sec * 1000 + now.tv_usec / 1000;
 
     // remove noise
     cv::medianBlur(img_color, img_color, 25);
@@ -128,6 +133,11 @@ int main(int argc, char* argv[])
         printf("\nDistance from Center: %d px\n"
                "Right / Left X: %d, %d\n", edge_img.cols / 2 - lane_center, lane_right_start_x, lane_left_start_x);
     }
+
+    gettimeofday(&now, NULL);
+    unsigned long end_time = now.tv_sec * 1000 + now.tv_usec / 1000;
+
+    printf("Processing took: %lu msec\n", end_time - start_time);
 
     // write out images for analysis
     cv::imwrite(string("blur_img.jpg"), img_color);
