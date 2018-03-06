@@ -29,7 +29,7 @@ int main(int argc, char* argv[])
     cv::resize(img_color, img_color, cv::Size(hres, vres), cv::INTER_AREA);
 
     // remove noise
-    cv::medianBlur(img_color, img_color, 15);
+    cv::medianBlur(img_color, img_color, 25);
     //cv::GaussianBlur(img_color, img_color, cv::Size(25, 25), 15, 1);
 
     // convert image to grayscale
@@ -42,8 +42,8 @@ int main(int argc, char* argv[])
 
     // blot out top half of image
     cv::rectangle(edge_img,
-                  cv::Point2i(0, 0),
-                  cv::Point2i(img_gray.cols - 1, img_gray.rows / 2),
+                  cv::Point2i(0, img_gray.rows / 2),
+                  cv::Point2i(img_gray.cols - 1, img_gray.rows),
                   cv::Scalar(0.0),
                   cv::FILLED);
 
@@ -61,7 +61,7 @@ int main(int argc, char* argv[])
         printf("  Radius: %f    Theta: %f\n", line[0], line[1] / CV_PI * 180.0);
 
         if ((line[1] > 0.2) && (line[1] < CV_PI - 0.2) &&
-            ((line[1] < 7.5 * CV_PI / 18.0) || (line[1] > 11.5 * CV_PI / 18.0)))
+            ((line[1] < 8.0 * CV_PI / 18.0) || (line[1] > 10.0 * CV_PI / 18.0)))
         {
             double slope = -1.0 / tan(line[1]);
             double y_init = line[0] * sin(line[1]);
