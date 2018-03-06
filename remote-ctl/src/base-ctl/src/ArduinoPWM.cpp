@@ -1,4 +1,4 @@
-#include "ArduinoPWM.h"
+#include "ArduinoMessenger.h"
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -11,7 +11,7 @@ using namespace std;
 
 void* send_mesg_loop(void* arduino_pwm_ptr)
 {
-    ArduinoPWM* arduino_pwm = (ArduinoPWM*)arduino_pwm_ptr;
+    ArduinoMessenger* arduino_pwm = (ArduinoMessenger*)arduino_pwm_ptr;
     bool running = arduino_pwm->running;
     bool empty = false;
 
@@ -29,15 +29,15 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
 
             if (write(arduino_pwm->uart_gateway, (void*)&mesg.header, sizeof(char)) == -1)
             {
-                printf("Error: ArduinoPWM::send_mesg_loop(): failed to send message header: %d\n", errno);
+                printf("Error: ArduinoMessenger::send_mesg_loop(): failed to send message header: %d\n", errno);
             }
             else if (write(arduino_pwm->uart_gateway, (void*)mesg.packets, (int)mesg.packets_num) == -1)
             {
-                printf("Error: ArduinoPWM::send_mesg_loop(): failed to send message body: %d\n", errno);
+                printf("Error: ArduinoMessenger::send_mesg_loop(): failed to send message body: %d\n", errno);
             }
             else if (write(arduino_pwm->uart_gateway, (void*)&mesg.checksum, sizeof(char)) == -1)
             {
-                printf("Error: ArduinoPWM::send_mesg_loop(): failed to send message checksum: %d\n", errno);
+                printf("Error: ArduinoMessenger::send_mesg_loop(): failed to send message checksum: %d\n", errno);
             }
 
             //usleep(50000);
@@ -62,27 +62,27 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
     return NULL;
 }
 
-ArduinoPWM::ArduinoPWM()
+ArduinoMessenger::ArduinoMessenger()
 {
     uart_gateway = open("/dev/ttyS0", O_RDWR);
 
     if (uart_gateway == -1)
     {
-        printf("Error: ArduinoPWM(): open(): failed to open serial line: %d\n", errno);
+        printf("Error: ArduinoMessenger(): open(): failed to open serial line: %d\n", errno);
         uart_gateway = 0;
         throw runtime_error("open(): failed to open serial line");
     }
 
     if (tcgetattr(uart_gateway, &uart_props) == -1)
     {
-        printf("Error: ArduinoPWM(): tcgetattr(): failed to get serial line attributes: %d\n", errno);
+        printf("Error: ArduinoMessenger(): tcgetattr(): failed to get serial line attributes: %d\n", errno);
         close(uart_gateway);
         throw runtime_error("tcgetattr(): failed to get serial line attributes");
     }
 
     if (cfsetspeed(&uart_props, B4800) == -1)
     {
-        printf("Error: ArduinoPWM(): cfsetspeed(): failed to set serial line speed: %d\n", errno);
+        printf("Error: ArduinoMessenger(): cfsetspeed(): failed to set serial line speed: %d\n", errno);
         close(uart_gateway);
         throw runtime_error("cfsetspeed(): failed to set serial line speed");
     }
@@ -97,36 +97,36 @@ ArduinoPWM::ArduinoPWM()
 
     if (pthread_mutex_init(&write_lock, NULL) == -1)
     {
-        printf("Error: ArduinoPWM(): pthread_mutex_init(): failed to initialize ArduinoPWM::write_lock mutex: %d\n", errno);
+        printf("Error: ArduinoMessenger(): pthread_mutex_init(): failed to initialize ArduinoMessenger::write_lock mutex: %d\n", errno);
         close(uart_gateway);
-        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoPWM::write_lock mutex");
+        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoMessenger::write_lock mutex");
     }
 
     if (pthread_mutex_init(&new_mesg_lock, NULL) == -1)
     {
-        printf("Error: ArduinoPWM(): pthread_mutex_init(): failed to initialize ArduinoPWM::new_mesg_lock mutex: %d\n", errno);
+        printf("Error: ArduinoMessenger(): pthread_mutex_init(): failed to initialize ArduinoMessenger::new_mesg_lock mutex: %d\n", errno);
         close(uart_gateway);
-        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoPWM::new_mesg_lock mutex");
+        throw runtime_error("pthread_mutex_init(): failed to initialize ArduinoMessenger::new_mesg_lock mutex");
     }
 
     if (pthread_cond_init(&new_mesg_sig, NULL) == -1)
     {
-        printf("Error: ArduinoPWM(): pthread_cond_init(): failed to initialize ArduinoPWM::new_mesg_sig condition: %d\n", errno);
+        printf("Error: ArduinoMessenger(): pthread_cond_init(): failed to initialize ArduinoMessenger::new_mesg_sig condition: %d\n", errno);
         close(uart_gateway);
-        throw runtime_error("pthread_cond_init(): failed to initialize ArduinoPWM::new_mesg_sig condition");
+        throw runtime_error("pthread_cond_init(): failed to initialize ArduinoMessenger::new_mesg_sig condition");
     }
 
     running = true;
 
     if (pthread_create(&send_mesg_thread, NULL, &send_mesg_loop, (void*)this) == -1)
     {
-        printf("Error: ArduinoPWM(): pthread_create(): failed to create background transfer thread: %d\n", errno);
+        printf("Error: ArduinoMessenger(): pthread_create(): failed to create background transfer thread: %d\n", errno);
         close(uart_gateway);
         throw runtime_error("pthread_create(): failed to create background transfer thread");
     }
 }
 
-ArduinoPWM::~ArduinoPWM()
+ArduinoMessenger::~ArduinoMessenger()
 {
     if (send_mesg_thread)
     {
@@ -149,17 +149,17 @@ ArduinoPWM::~ArduinoPWM()
     }
 }
 
-int ArduinoPWM::buf_to_mesg(struct PWMMesg& mesg, int address, const void* buf, int size)
+int ArduinoMessenger::buf_to_mesg(struct PWMMesg& mesg, int address, const void* buf, int size)
 {
     if (address >= MAX_ADDR || address < 0)
     {
-        printf("Error: ArduinoPWM.buf_to_mesg(): address %d is out of range\n", address);
+        printf("Error: ArduinoMessenger.buf_to_mesg(): address %d is out of range\n", address);
         return -1;
     }
 
     if (size >= MAX_MESG_SIZE || size < 1)
     {
-        printf("Error: ArduinoPWM.buf_to_mesg(): message size of %d bytes is out of range\n", size);
+        printf("Error: ArduinoMessenger.buf_to_mesg(): message size of %d bytes is out of range\n", size);
         return -1;
     }
 
@@ -258,7 +258,7 @@ void display_mesg(const struct PWMMesg& mesg)
     printf("\n");
 }
 
-int ArduinoPWM::send_mesg(int address, const void* buf, int size)
+int ArduinoMessenger::send_mesg(int address, const void* buf, int size)
 {
     struct PWMMesg mesg;
     memset(&mesg, 0, sizeof(struct PWMMesg));
@@ -278,17 +278,17 @@ int ArduinoPWM::send_mesg(int address, const void* buf, int size)
     return 0;
 }
 
-int ArduinoPWM::send_mesg(const struct PWMMesg& mesg)
+int ArduinoMessenger::send_mesg(const struct PWMMesg& mesg)
 {
     if (mesg.address >= MAX_ADDR)
     {
-        printf("Error: ArduinoPWM.send_mesg(): address %d is out of range\n", (int)mesg.address);
+        printf("Error: ArduinoMessenger.send_mesg(): address %d is out of range\n", (int)mesg.address);
         return -1;
     }
 
     if (mesg.bytes >= MAX_MESG_SIZE)
     {
-        printf("Error: ArduinoPWM.send_mesg(): message size of %d bytes is out of range\n", (int)mesg.bytes + 1);
+        printf("Error: ArduinoMessenger.send_mesg(): message size of %d bytes is out of range\n", (int)mesg.bytes + 1);
         return -1;
     }
 

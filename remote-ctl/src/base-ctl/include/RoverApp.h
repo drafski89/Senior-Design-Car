@@ -2,7 +2,7 @@
 #define __ROVER_APP__
 
 #include "RemoteCtlApp.h"
-#include "ArduinoPWM.h"
+#include "ArduinoMessenger.h"
 #include <string>
 #include <iostream>
 #include <cstdlib>
@@ -20,8 +20,8 @@ class RoverApp
 private:
     bool running;
     bool autonomous; // take inputs from the ROS listener
-    
-    ArduinoPWM pwm_gateway;
+
+    ArduinoMessenger pwm_gateway;
     struct GamepadState gamepad_state;
     short steering_angle;
     short drive_power;
@@ -36,7 +36,7 @@ private:
     pthread_mutex_t write_lock;
     pthread_rwlock_t rc_semaphore;
     pthread_rwlock_t base_state_semaphore;
-    
+
     ros::NodeHandle rosnode;
 
 public:

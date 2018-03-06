@@ -19,32 +19,42 @@ struct PWMMesg
     unsigned char packets[16];
 };
 
-#define MAX_ADDR      8  ///< Only 8 PWMs are addressable
+#define MAX_ADDR      8  ///< Only 8 mailboxes are addressable
 #define MAX_MESG_SIZE 14 ///< 14 bytes maximum message size
 
 /**
- * This class manages the generation of PWM signals by the Arduino. The Arduino
- * is to have its serial line connected to UART0 on the Jetson expansion header.
+ * This class manages the passing of messages to the Arduino. The Arduino is to
+ * have its serial line connected to a UART on the Jetson. This may be an onboard
+ * UART or an auxiliary one such as an FTDI connected to USB.
  *
  * Upon construction, this class will open the serial line, set the correct baud,
- * and begin transmitting the requested motor speeds and steering angles to the
- * Arduino using a specialized UART protocol. See LongDataUARTProtocol.md for more
- * details on this data exchange system. All messages are transmitted in a
- * background thread to prevent blocking and polling. If the serial line cannot
- * be opened or the background thread and assosciated data structures cannot be
- * created, the constructor of this class will throw a std::runtime_exception().
+ * and immediately allow for messages to be sent to the Arduino using a
+ * specialized UART protocol. See LongDataUARTProtocol.md for more details on
+ * this data exchange system. All messages are transmitted in a background
+ * thread to prevent blocking and polling. If the serial line cannot be opened
+ * or the background thread and associated data structures cannot be created,
+ * the constructor of this class will throw a std::runtime_exception().
  *
- * Once constructed, the user can set the motor speed and steering angle by
- * using the send_mesg() method. You do NOT need multiple instances of this class
- * to control the speed and steering. See send_mesg() documentation for more details.
- * Currently, the class does not filter redudant messages or cap their arrival
- * rate so the user should be careful to not saturate the Arduino. The transmission
- * rate is only 4800 baud and a message is typically 5 bytes in length.
+ * Once constructed, the user can send the Arduino data of variable length up
+ * to 14 bytes to various mailboxes - up to 8 - using the send_mesg() method.
+ * You do NOT need multiple instances of this class to send data to different
+ * mailboxes. See send_mesg() documentation for more details. Currently, the
+ * class does not filter redudant messages or cap their arrival rate so the user
+ * should be careful to not saturate the Arduino. The transmission rate is set
+ * at 4800 baud and a message is a minimum of 4 bytes in length. Please note
+ * that Arduino will need to have the motor-ctl.c project flashed onto it and
+ * the code updated to register each mailbox you wish to send data to.
+ *
+ * This class's main use at present is to control the throttle and steering of
+ * the car via PWM. Two-byte messages arriving in mailboxes 0 and 1 are the
+ * exact microsecond values that the high pulse of the PWM should last for
+ * throttle and steering respectively. 1500 is neutral; 2000 is full foward /
+ * full right; 1000 is full backward / full left.
  *
  * When this class is destroyed, it will shutdown the background thread and close
  * the serial line if necessary.
  */
-class ArduinoPWM
+class ArduinoMessenger
 {
     /**
      * Background loop for sending data to the Arduino. It is a static function
@@ -54,7 +64,7 @@ class ArduinoPWM
      * the same as a member function. On each iteration, the thread will extract
      * the next message from the queue and send it to the Arduino.
      *
-     * @param arduino_pwm_ptr: pointer to an instance of the ArduinoPWM class as
+     * @param arduino_pwm_ptr: pointer to an instance of the ArduinoMessenger class as
      * given by the 'this' keyword.
      * @return Always returns NULL.
      */
@@ -74,8 +84,8 @@ private:
 
 public:
 
-    ArduinoPWM();
-    ~ArduinoPWM();
+    ArduinoMessenger();
+    ~ArduinoMessenger();
 
     /**
      * Translates a series of bytes into a properly formatted message to be sent
@@ -84,6 +94,8 @@ public:
      * controlled by messages arriving in mailbox 0 and the steering angle is
      * controlled by messages arriving in mailbox 1.
      *
+     * Concerning PWM:
+     * ---
      * On the Arduino side, the speeds and angles are controlled using a 16 bit
      * signed value which is simply the exact number of microseconds the high pulse
      * in the signal should last. 1000: Full back / Full left. 1500: Neutral.
