@@ -20,6 +20,7 @@ class RoverApp
 private:
     bool running;
     bool autonomous; // take inputs from the ROS listener
+    bool debug_out;
 
     ArduinoMessenger pwm_gateway;
     struct GamepadState gamepad_state;
@@ -28,6 +29,7 @@ private:
     ros::Subscriber ctl_listener;
 
     int cmd_socket;
+    int throttle_trim;
     struct sockaddr_in cmd_host_addr;
 
     pthread_t ctl_thread;
@@ -40,7 +42,7 @@ private:
     ros::NodeHandle rosnode;
 
 public:
-    RoverApp(const struct in_addr& host);
+    RoverApp(const struct in_addr& host, bool debug_out);
     ~RoverApp();
 
     void recieve_cmds();

@@ -93,7 +93,11 @@ void* ctl_loop(void* rover_ptr)
         else if (speed_limit_up)
         {
             speed_limit_up = false;
-            if (throttle_max < 500.0) { throttle_max += 50 }
+            if (throttle_max < 500.0)
+            {
+                rover->throttle_trim = throttle_max;
+                throttle_max += 50;
+            }
         }
 
         // if throttle limit down button bumped
@@ -101,10 +105,14 @@ void* ctl_loop(void* rover_ptr)
         {
             speed_limit_down = true;
         }
-        else if (speed_limit_up)
+        else if (speed_limit_down)
         {
             speed_limit_down = false;
-            if (throttle_max > 0.0) { throttle_max -= 50 }
+            if (throttle_max > 0.0)
+            {
+                rover->throttle_trim = throttle_max;
+                throttle_max -= 50;
+            }
         }
 
         // if E Stop button pressed
@@ -247,7 +255,7 @@ void* ros_listen_loop(void* rover_ptr)
     return NULL;
 }
 
-RoverApp::RoverApp(const struct in_addr& host) : rosnode(ros::NodeHandle())
+RoverApp::RoverApp(const struct in_addr& host, bool _debug_out) : rosnode(ros::NodeHandle()), debug_out(_debug_out)
 {
     printf("Creating TCP socket for recieving commands...\n");
     cmd_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -416,10 +424,14 @@ void RoverApp::recieve_cmds()
                     button[index] = gamepad_state.button[index] + 0x30;
                 }
 
-                printf("LX: % 6.04f    LY: % 6.04f    LT: % 6.04f    RX: % 6.04f    RY: % 6.04f    RT: % 6.04f    %s\r",
-                       gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
-                       gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
-                       button);
+                if (!debug_out)
+                {
+                    printf("LX: % 6.04f   LY: % 6.04f   LT: % 6.04f   RX: % 6.04f   RY: % 6.04f   RT: % 6.04f   Trim: %d   %s\r",
+                           gamepad_state.axis_lx, gamepad_state.axis_ly, gamepad_state.axis_lt,
+                           gamepad_state.axis_rx, gamepad_state.axis_ry, gamepad_state.axis_rt,
+                           throttle_trim,
+                           button);
+                }
             }
         }
         else

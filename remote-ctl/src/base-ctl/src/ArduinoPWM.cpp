@@ -64,7 +64,7 @@ void* send_mesg_loop(void* arduino_pwm_ptr)
 
 ArduinoMessenger::ArduinoMessenger()
 {
-    uart_gateway = open("/dev/ttyS0", O_RDWR);
+    uart_gateway = open("/dev/ttyUSB1", O_RDWR);
 
     if (uart_gateway == -1)
     {

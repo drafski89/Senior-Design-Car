@@ -15,6 +15,7 @@ int main(int argc, char* argv[])
     string addr_str;
     struct in_addr host_addr;
     RoverApp* rover = NULL;
+    bool debug_out = false;
 
     if (argc > 1)
     {
@@ -33,9 +34,16 @@ int main(int argc, char* argv[])
                    "  control host.\n"
                    "\n"
                    "Options:\n"
+                   "  -d      - include debug output\n"
                    "  --help  - displays this help message and exits\n");
 
              return EXIT_SUCCESS;
+        }
+        if (strcmp(argv[1], "-d") == 0)
+        {
+            debug_out = true;
+            argc--;
+            argv += sizeof(char**);
         }
         if (!inet_aton(argv[1], &host_addr))
         {
@@ -43,7 +51,7 @@ int main(int argc, char* argv[])
             return EXIT_FAILURE;
         }
 
-        argc++;
+        argc--;
         argv += sizeof(char**);
     }
     else
@@ -60,7 +68,7 @@ int main(int argc, char* argv[])
     try
     {
         ros::init(argc, argv, "base_ctl");
-        rover = new RoverApp(host_addr);
+        rover = new RoverApp(host_addr, debug_out);
     }
     catch (exception& exc)
     {
