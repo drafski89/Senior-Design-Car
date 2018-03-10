@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <cmath>
 #include "sensor_msgs/Image.h"
+#include "cv_bridge/cv_bridge.h"
 
 using namespace std;
 
@@ -57,7 +58,7 @@ LaneDetector::LaneDetector() : running(true), median_blur_radius(25), rosnode(ro
         throw runtime_error(string("pthread_rwlock_init: failed to initialize LaneDetector.exit_semaphore: ") + to_string(errno));
     }
 
-    if (pthread_create(&lane_detection_thread, NULL) == -1)
+    if (pthread_create(&lane_detection_thread, NULL, &lane_detection_loop, (void*)this) == -1)
     {
         throw runtime_error(string("pthread_create(): failed to start background processing thread: ") + to_string(errno));
     }
@@ -72,8 +73,8 @@ LaneDetector::~LaneDetector()
     pthread_join(lane_detection_thread, NULL);
 }
 
-double detection_confidence(const vector<cv::Vec2d&>& lane_lines_left,
-        const vector<cv::Vec2d&>& lane_lines_right)
+double detection_confidence(const vector<cv::Vec2d>& lane_lines_left,
+        const vector<cv::Vec2d>& lane_lines_right)
 {
     const int RADIUS_L = 0;
     const int THETA_L = 1;
@@ -81,10 +82,9 @@ double detection_confidence(const vector<cv::Vec2d&>& lane_lines_left,
     const int THETA_R = 3;
     vector<double> averages = {0.0, 0.0, 0.0, 0.0};
     vector<double> stddevs = {0.0, 0.0, 0.0, 0.0};
-    double radius_left_avg, radius_right_avg, theta_left_avg, theta_right_avg = 0.0;
 
     // calculate average radius and angles for left lane markers
-    for (cv::Vec2d& line : lane_lines_left)
+    for (const cv::Vec2d& line : lane_lines_left)
     {
         averages[RADIUS_L] += abs(line[0]);
         averages[THETA_L] += line[1];
@@ -94,17 +94,17 @@ double detection_confidence(const vector<cv::Vec2d&>& lane_lines_left,
     averages[THETA_L] /= (double)lane_lines_left.size();
 
     // calculate the average radius and angles for the right lane markers
-    for (cv::Vec2d& line : lane_lines_right)
+    for (const cv::Vec2d& line : lane_lines_right)
     {
         averages[RADIUS_R] += abs(line[0]);
-        avreages[THETA_R] += line[1];
+        averages[THETA_R] += line[1];
     }
 
     averages[RADIUS_R] /= (double)lane_lines_right.size();
     averages[THETA_R] /= (double)lane_lines_right.size();
 
     // comput standard variance / deviation for the left sample
-    for (cv::Vec2d& line : lane_lines_left)
+    for (const cv::Vec2d& line : lane_lines_left)
     {
         double radius_var2 = abs(line[0]) - averages[RADIUS_L];
         double theta_var2 = line[1] - averages[THETA_L];
@@ -116,7 +116,7 @@ double detection_confidence(const vector<cv::Vec2d&>& lane_lines_left,
     stddevs[THETA_L] /= (double)lane_lines_left.size();
 
     // compute standard variance / deviation for the right sample
-    for (cv::Vec2d& line : lane_lines_right)
+    for (const cv::Vec2d& line : lane_lines_right)
     {
         double radius_var2 = abs(line[0]) - averages[RADIUS_R];
         double theta_var2 = line[1] - averages[THETA_R];
@@ -208,8 +208,8 @@ void LaneDetector::detect_lane()
     cv::HoughLines(edge_img, lines, hough_radius_inc, hough_theta_inc, hough_min_votes);
 
     printf("Found %lu lines in the image\n", lines.size());
-    vector<cv::Vec2d&> raw_lines_left;
-    vector<cv::Vec2d&> raw_lines_right;
+    vector<cv::Vec2d> raw_lines_left;
+    vector<cv::Vec2d> raw_lines_right;
     vector<cv::Vec2d> lane_lines_left;
     vector<cv::Vec2d> lane_lines_right;
 
@@ -301,7 +301,7 @@ void LaneDetector::detect_lane()
     }
     else
     {
-        struct LanePosepose;
+        struct LanePose pose;
         pose.center_offset = 0;
         pose.heading = 0.0;
         pose.confidence = 0.0;
@@ -340,12 +340,12 @@ struct LanePose LaneDetector::get_vehicle_pose()
 void LaneDetector::lane_guidance()
 {
     struct pollfd stdin_timeout[1];
-    stdin_timeout.fd = STDIN_FILENO;
-    stdin_timeout.events = POLLIN | POLLPRI;
+    stdin_timeout[0].fd = STDIN_FILENO;
+    stdin_timeout[0].events = POLLIN | POLLPRI;
 
     while (ros::ok())
     {
-        int poll_status = poll(&stdin_timeout, 1, 100);
+        int poll_status = poll(stdin_timeout, 1, 100);
 
         if (poll_status > 0)
         {
