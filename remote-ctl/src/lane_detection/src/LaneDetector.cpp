@@ -12,6 +12,7 @@ pthread_rwlock_t imgproc_semaphore = PTHREAD_RWLOCK_INITIALIZER;
 
 void img_listener(const sensor_msgs::Image& img)
 {
+    // printf("new image\n");
     pthread_rwlock_wrlock(&imgproc_semaphore);
     // copy the image onto the heap meaning it can exist without the global binding
     current_img = new cv::Mat(cv_bridge::toCvCopy(img, string("bgr8"))->image);
@@ -49,9 +50,9 @@ void* lane_detection_loop(void* detector_ptr)
 
 LaneDetector::LaneDetector() : running(true), median_blur_radius(25), rosnode(ros::NodeHandle()),
         canny_grad_thresh(80), canny_cont_thresh(40), hough_radius_inc(10),
-        hough_theta_inc(4.0 * CV_PI / 180.0), hough_min_votes(400)
+        hough_theta_inc(4.0 * CV_PI / 180.0), hough_min_votes(300)
 {
-    laneimg_listener = rosnode.subscribe("/color/image_raw", 1, img_listener);
+    laneimg_listener = rosnode.subscribe("camera/rgb/image_rect_color", 2, img_listener);
 
     if (pthread_rwlock_init(&exit_semaphore, NULL) == -1)
     {
@@ -167,6 +168,7 @@ void LaneDetector::detect_lane()
     if (!current_img)
     {
         pthread_rwlock_unlock(&imgproc_semaphore);
+        printf("No image to process. Sleeping\n");
         return;
     }
 
@@ -217,7 +219,7 @@ void LaneDetector::detect_lane()
     {
         printf("  Radius: %f    Theta: %f\n", line[0], line[1] / CV_PI * 180.0);
 
-        if ((line[1] > 0.2) && (line[1] < CV_PI - 0.2) &&
+        if ((line[1] > 7.0 * CV_PI / 180.0) && (line[1] < 173.0 * CV_PI / 180.0) &&
             ((line[1] < 8.0 * CV_PI / 18.0) || (line[1] > 10.0 * CV_PI / 18.0)))
         {
             double slope = -1.0 / tan(line[1]);
@@ -298,6 +300,8 @@ void LaneDetector::detect_lane()
         pose.heading = 0.0;
         pose.confidence = detection_confidence(raw_lines_left, raw_lines_right);
         current_pose = pose;
+
+        printf("Detection Confidence: %%%3.1f\n", pose.confidence * 100.0);
     }
     else
     {
@@ -310,6 +314,15 @@ void LaneDetector::detect_lane()
 
     gettimeofday(&now, NULL);
     unsigned long end_time = now.tv_sec * 1000 + now.tv_usec / 1000;
+    char filename[32];
+    memset(filename, '\0', 32);
+
+    sprintf(filename, "%lu_img.jpg", end_time);
+    cv::imwrite(filename, img_color);
+
+    memset(filename, '\0', 32);
+    sprintf(filename, "%lu_edges.jpg", end_time);
+    cv::imwrite(filename, edge_img);
 
     printf("Processing took: %lu msec\n", end_time - start_time);
 
@@ -345,7 +358,7 @@ void LaneDetector::lane_guidance()
 
     while (ros::ok())
     {
-        int poll_status = poll(stdin_timeout, 1, 100);
+        int poll_status = poll(stdin_timeout, 1, 10);
 
         if (poll_status > 0)
         {
@@ -354,6 +367,10 @@ void LaneDetector::lane_guidance()
             {
                 break;
             }
+        }
+        else
+        {
+            ros::spinOnce();
         }
     }
 }
