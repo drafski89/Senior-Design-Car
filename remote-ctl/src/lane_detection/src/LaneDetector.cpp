@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <cmath>
 #include "sensor_msgs/Image.h"
+#include "std_msgs/ColorRGBA.h"
 #include "cv_bridge/cv_bridge.h"
 
 using namespace std;
@@ -49,10 +50,11 @@ void* lane_detection_loop(void* detector_ptr)
 }
 
 LaneDetector::LaneDetector() : running(true), median_blur_radius(25), rosnode(ros::NodeHandle()),
-        canny_grad_thresh(80), canny_cont_thresh(40), hough_radius_inc(10),
+        canny_grad_thresh(80), canny_cont_thresh(30), hough_radius_inc(10),
         hough_theta_inc(4.0 * CV_PI / 180.0), hough_min_votes(300)
 {
     laneimg_listener = rosnode.subscribe("camera/rgb/image_rect_color", 2, img_listener);
+    pose_publisher = rosnode.advertise<std_msgs::ColorRGBA>("lane_pose", 2);
 
     if (pthread_rwlock_init(&exit_semaphore, NULL) == -1)
     {
@@ -169,6 +171,9 @@ void LaneDetector::detect_lane()
     {
         pthread_rwlock_unlock(&imgproc_semaphore);
         printf("No image to process. Sleeping\n");
+        std_msgs::ColorRGBA mesg;
+        mesg.r = 0;
+        mesg.b = 0;
         return;
     }
 
@@ -199,8 +204,8 @@ void LaneDetector::detect_lane()
 
     // blot out top half of image
     cv::rectangle(edge_img,
-                  cv::Point2i(0, img_gray.rows / 2),
-                  cv::Point2i(img_gray.cols - 1, img_gray.rows),
+                  cv::Point2i(0, 0),
+                  cv::Point2i(img_gray.cols - 1, img_gray.rows / 3),
                   cv::Scalar(0.0),
                   cv::FILLED);
 
@@ -251,7 +256,7 @@ void LaneDetector::detect_lane()
                      cv::Scalar(255.0),
                      10);
 
-            printf("(%f, %f), (%f, %f)\n", x1, y1, x2, y2);
+            printf("  (%f, %f), (%f, %f)\n", x1, y1, x2, y2);
         }
     }
 
@@ -264,7 +269,7 @@ void LaneDetector::detect_lane()
         for (int index = 1; index < lane_lines_left.size(); index++)
         {
             lane_left[0] += lane_lines_left[index][0];
-            lane_left[1] = lane_lines_left[index][1];
+            lane_left[1] += lane_lines_left[index][1];
         }
         
         lane_left[0] /= (double)lane_lines_left.size();
@@ -284,7 +289,7 @@ void LaneDetector::detect_lane()
         int lane_right_start_x = ((double)lane_start_y - lane_right[1]) / lane_right[0];
         int lane_center = lane_left_start_x + ((double)lane_right_start_x - lane_left_start_x) / 2.0;
         int xint = (lane_right[1] - lane_left[1]) / (lane_left[0] - lane_right[0]);
-        int yint = lane_right[0] * xint + lane_right[0];
+        int yint = lane_right[0] * xint + lane_right[1];
 
         cv::line(edge_img,
                  cv::Point2i(xint, yint),
@@ -292,8 +297,8 @@ void LaneDetector::detect_lane()
                  cv::Scalar(255.0),
                  5);
 
-        printf("\nDistance from Center: %d px\n"
-               "Right / Left X: %d, %d\n", edge_img.cols / 2 - lane_center, lane_right_start_x, lane_left_start_x);
+        printf("\n  Distance from Center: %d px\n"
+               "  Right / Left X: %d, %d\n", edge_img.cols / 2 - lane_center, lane_right_start_x, lane_left_start_x);
         
         struct LanePose pose;
         pose.center_offset = edge_img.cols / 2 - lane_center;
@@ -301,7 +306,7 @@ void LaneDetector::detect_lane()
         pose.confidence = detection_confidence(raw_lines_left, raw_lines_right);
         current_pose = pose;
 
-        printf("Detection Confidence: %%%3.1f\n", pose.confidence * 100.0);
+        printf("  Detection Confidence: %%%3.1f\n", pose.confidence * 100.0);
     }
     else
     {
@@ -314,17 +319,31 @@ void LaneDetector::detect_lane()
 
     gettimeofday(&now, NULL);
     unsigned long end_time = now.tv_sec * 1000 + now.tv_usec / 1000;
-    char filename[32];
-    memset(filename, '\0', 32);
 
-    sprintf(filename, "%lu_img.jpg", end_time);
+    char filename[128];
+    memset(filename, '\0', 128);
+
+    sprintf(filename, "/media/nvidia/seniorDesign/LaneDetectionDebug/%lu_img.jpg", end_time);
     cv::imwrite(filename, img_color);
 
     memset(filename, '\0', 32);
-    sprintf(filename, "%lu_edges.jpg", end_time);
+    sprintf(filename, "/media/nvidia/seniorDesign/LaneDetectionDebug/%lu_edges.jpg", end_time);
     cv::imwrite(filename, edge_img);
 
-    printf("Processing took: %lu msec\n", end_time - start_time);
+    printf("Processing took: %lu msec\n\n----\n\n", end_time - start_time);
+
+    std_msgs::ColorRGBA mesg;
+    mesg.r = current_pose.center_offset / 850.0;
+    if (mesg.r > 1.0)
+    {
+        mesg.r = 1.0;
+    }
+    else if (mesg.r < -1.0)
+    {
+        mesg.r = -1.0;
+    }
+    mesg.g = current_pose.confidence;
+    pose_publisher.publish(mesg);
 
     delete source_img;
 }

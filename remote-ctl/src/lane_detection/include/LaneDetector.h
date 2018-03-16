@@ -31,6 +31,7 @@ private:
 
     ros::NodeHandle rosnode;
     ros::Subscriber laneimg_listener;
+    ros::Publisher pose_publisher;
 
     pthread_t lane_detection_thread;
     pthread_rwlock_t exit_semaphore;

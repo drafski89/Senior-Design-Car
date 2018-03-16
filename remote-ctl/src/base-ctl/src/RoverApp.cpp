@@ -96,7 +96,7 @@ void* ctl_loop(void* rover_ptr)
             if (throttle_max < 500.0)
             {
                 rover->throttle_trim = throttle_max;
-                throttle_max += 50;
+                throttle_max += 25;
             }
         }
 
@@ -111,7 +111,7 @@ void* ctl_loop(void* rover_ptr)
             if (throttle_max > 0.0)
             {
                 rover->throttle_trim = throttle_max;
-                throttle_max -= 50;
+                throttle_max -= 25;
             }
         }
 
@@ -139,6 +139,15 @@ void* ctl_loop(void* rover_ptr)
             if (abs(gamepad_state.axis_lx) > 0.2)
             {
                 steering_val = gamepad_state.axis_lx;
+
+                if (steering_val < 0.0)
+                {
+                    steering_val = (steering_val + 0.2) / 0.8;
+                }
+                else
+                {
+                    steering_val = (steering_val - 0.2) / 0.8;
+                }
             }
 
             if (abs(gamepad_state.axis_ry) > 0.3)
